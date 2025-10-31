@@ -1,4 +1,4 @@
-\// src/PersonalStylistUI/SuggestionsGrid.tsx
+// src/PersonalStylistUI/SuggestionsGrid.tsx
 import { Wand2, Loader2 } from "lucide-react";
 import OutfitCard from "./OutfitCard";
 import type { Outfit } from "@/types";
