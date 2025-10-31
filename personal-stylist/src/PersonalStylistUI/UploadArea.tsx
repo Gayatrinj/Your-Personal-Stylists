@@ -1,5 +1,5 @@
 import React from "react";
-import { Upload, Image as ImageIcon } from "lucide-react";
+import { Upload } from "lucide-react";
 
 export default function UploadArea({ onUpload }:{ onUpload:(files:File[])=>void }) {
   return (
@@ -11,9 +11,7 @@ export default function UploadArea({ onUpload }:{ onUpload:(files:File[])=>void 
         </div>
         <div className="flex gap-2">
           <FileButton icon={<Upload className="h-4 w-4" />} onFiles={onUpload}>Upload photos</FileButton>
-          <button className="inline-flex items-center gap-2 rounded-xl bg-zinc-100 px-3 py-2 text-sm hover:bg-zinc-200 transition">
-            <ImageIcon className="h-4 w-4" /> Add color cards
-          </button>
+          
         </div>
       </div>
     </div>
