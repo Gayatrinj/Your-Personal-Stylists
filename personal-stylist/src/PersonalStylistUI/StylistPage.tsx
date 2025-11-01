@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+// src/PersonalStylistUI/StylistPage.tsx
+import { useEffect, useMemo, useState } from "react";
 import TopBar from "./TopBar";
 import SuggestControls from "./SuggestControls";
 import UploadArea from "./UploadArea";
@@ -8,7 +9,12 @@ import ControlsBar from "./ControlsBar";
 import type { Outfit, ClosetItem, Profile } from "@/types";
 import { useLocalStorage } from "@/hooks/useLocalStorage";
 import { suggestWithGemini } from "@/api/suggest";
-import { Menu, Loader2 } from "lucide-react";
+import { Menu, Loader2, LogIn } from "lucide-react";
+
+//  Auth + Onboarding
+import { useAuth } from "@/auth/AuthContext";
+import { Onboarding } from "@/onboarding/Onboarding";
+import type { OnboardingData } from "@/onboarding/Onboarding";
 
 type Controls = { casualFormal: number; playfulPro: number };
 type SourceMode = "shop_anywhere" | "prefer_closet" | "closet_only";
@@ -31,7 +37,17 @@ function rationaleForBodyType(bt?: Profile["bodyType"]) {
   }
 }
 
+// localStorage keys scoped per user
+const doneKey = (uid?: string) => (uid ? `onboarding_done_${uid}` : "");
+const dataKey = (uid?: string) => (uid ? `onboarding_data_${uid}` : "");
+
 export default function StylistPage() {
+  // Auth
+  const { user, isLoading: authLoading, signInWithGoogle } = useAuth();
+
+  // Onboarding visibility
+  const [showOnboarding, setShowOnboarding] = useState(false);
+
   // filters
   const [prompt, setPrompt] = useState("");
   const [style, setStyle] = useState("Smart casual");
@@ -128,7 +144,7 @@ export default function StylistPage() {
       const data = await suggestWithGemini(filters);
       const base = data.length ? data : demoOutfits();
 
-      // ------ Hydration with robust fallback buy links ------
+      // Hydration with robust fallback buy links
       const hydrated: Outfit[] = base.map((o) => {
         // Images
         const urls = o.imageUrls?.length
@@ -152,13 +168,11 @@ export default function StylistPage() {
           `${style || "outfit"} ${occasion || ""} ${season || ""} outfit`.trim();
 
         const fallbackLinks = wantLinks
-          ? [
-              {
-                label: "See similar",
-                url: `https://www.google.com/search?q=${encodeURIComponent(searchQuery)}&tbm=shop`,
-                retailer: "Google Shopping",
-              },
-            ]
+          ? [{
+              label: "See similar",
+              url: `https://www.google.com/search?q=${encodeURIComponent(searchQuery)}&tbm=shop`,
+              retailer: "Google Shopping",
+            }]
           : [];
 
         const buyLinks =
@@ -168,7 +182,6 @@ export default function StylistPage() {
 
         return { ...o, imageUrls: urls, buyLinks };
       });
-      // ------------------------------------------------------
 
       setOutfits(hydrated);
     } catch {
@@ -189,6 +202,66 @@ export default function StylistPage() {
     });
     await handleSuggest();
   }
+
+  // ---------- AUTH GATE ----------
+  if (authLoading) {
+    return (
+      <div className="min-h-screen grid place-items-center text-zinc-700">
+        <div className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
+          Checking your session…
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen grid place-items-center bg-white px-4">
+        <div className="w-full max-w-sm rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm text-center">
+          <h1 className="text-lg font-semibold">Welcome to StyleAI</h1>
+          <p className="mt-2 text-sm text-zinc-600">
+            Sign in to save your closet, profile, and outfits.
+          </p>
+          <button
+            onClick={signInWithGoogle}
+            className="mt-4 inline-flex items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2 text-sm text-white hover:bg-zinc-800"
+          >
+            <LogIn className="h-4 w-4" />
+            Continue with Google
+          </button>
+          <p className="mt-3 text-[11px] text-zinc-500">
+            By continuing, you agree to our Terms and Privacy Policy.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+
+  // Show onboarding only after login and if not completed
+  useEffect(() => {
+    const key = doneKey(user?.uid);
+    if (!key) return;
+    const done = localStorage.getItem(key) === "1";
+    setShowOnboarding(!done);
+  }, [user]);
+
+  // Seed defaults from any previous onboarding snapshot
+  useEffect(() => {
+    const k = dataKey(user?.uid);
+    if (!k) return;
+    const raw = localStorage.getItem(k);
+    if (!raw) return;
+    try {
+      const d = JSON.parse(raw) as OnboardingData;
+      if (Array.isArray(d.styles) && d.styles[0]) setStyle(d.styles[0]);
+      if (Array.isArray(d.occasions) && d.occasions[0]) setOccasion(d.occasions[0]);
+      if (Array.isArray(d.seasons) && d.seasons[0]) setSeason(d.seasons[0]);
+      if (Array.isArray(d.colors) && d.colors.length) setPalette(d.colors);
+    } catch {
+      // ignore parse errors
+    }
+  }, [user, setPalette]);
 
   return (
     <div className="min-h-screen bg-white text-zinc-900">
@@ -334,7 +407,7 @@ export default function StylistPage() {
                         }}
                         onToggleFavorite={handleToggleFavorite}
                         onVerdict={() => {}}
-                        showBuyLinks={source !== "closet_only"} // NEW: hide in closet-only mode
+                        showBuyLinks={source !== "closet_only"} // hide links in closet-only mode
                       />
                       {rationale && <p className="mt-1 text-xs text-zinc-600">{rationale}</p>}
                     </div>
@@ -366,6 +439,38 @@ export default function StylistPage() {
           </footer>
         </div>
       </div>
+
+      {/* 🎯 Onboarding modal (only after login, and only once per user unless reset) */}
+      {user && showOnboarding && (
+        <Onboarding
+          defaultValues={{
+            styles: [style],
+            occasions: [occasion],
+            seasons: [season],
+            colors: palette,
+          }}
+          onSkip={() => {
+            localStorage.setItem(doneKey(user.uid), "1");
+            setShowOnboarding(false);
+          }}
+          onComplete={(values) => {
+            // persist snapshot
+            localStorage.setItem(doneKey(user.uid), "1");
+            localStorage.setItem(dataKey(user.uid), JSON.stringify(values));
+
+            // apply to current page state so badges reflect it immediately
+            if (values.styles?.[0]) setStyle(values.styles[0]);
+            if (values.occasions?.[0]) setOccasion(values.occasions[0]);
+            if (values.seasons?.[0]) setSeason(values.seasons[0]);
+            if (values.colors?.length) setPalette(values.colors);
+
+            setShowOnboarding(false);
+
+            // Optional: auto-generate suggestions right after onboarding
+            // handleSuggest();
+          }}
+        />
+      )}
     </div>
   );
 }
