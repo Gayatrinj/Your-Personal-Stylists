@@ -17,7 +17,7 @@ export default function SavedList() {
         <div className="mb-6 flex items-center justify-between">
           <h1 className="text-xl font-semibold">Saved outfits</h1>
           <Link
-            to="/"
+            to="/app"
             className="text-sm text-zinc-600 hover:text-zinc-900 underline underline-offset-4"
           >
             ← Back to generator
