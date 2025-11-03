@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { Sparkles } from "lucide-react";
 
 export default function LandingPage() {
   return (
@@ -7,8 +8,13 @@ export default function LandingPage() {
       <header className="border-b border-zinc-200">
         <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4">
           <Link to="/" className="flex items-center gap-2">
-            <div className="h-6 w-6 rounded-md bg-zinc-900" />
-            <span className="text-lg font-semibold">StyleAI</span>
+            <div className=""/>
+            <div className="flex items-center gap-2 font-semibold">
+            <div className="inline-grid h-8 w-8 place-items-center rounded-lg bg-gradient-to-br from-fuchsia-600 to-violet-600 text-white">
+              <Sparkles className="h-4 w-4" />
+            </div>
+            <span className="tracking-tight">StyleAI</span>
+          </div>
           </Link>
           <nav className="flex items-center gap-3">
             <Link

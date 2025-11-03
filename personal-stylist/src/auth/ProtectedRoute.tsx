@@ -6,5 +6,6 @@ import type { ReactNode } from "react";
 export default function ProtectedRoute({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth();
   if (loading) return null; // or a spinner
-  return user ? <>{children}</> : <Navigate to="/login" replace />;
+  // ⬇️ redirect unauthenticated to LANDING, not /login
+  return user ? <>{children}</> : <Navigate to="/" replace />;
 }
