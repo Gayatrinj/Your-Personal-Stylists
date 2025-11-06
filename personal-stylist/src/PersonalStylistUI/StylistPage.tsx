@@ -43,7 +43,7 @@ const dataKey = (uid?: string) => (uid ? `onboarding_data_${uid}` : "");
 
 export default function StylistPage() {
   // Auth
-  const { user, isLoading: authLoading, signInWithGoogle } = useAuth();
+  const { user, isLoading: authLoading, signInWithGoogle, signOut } = useAuth();
 
   // Onboarding visibility
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -144,7 +144,7 @@ export default function StylistPage() {
       const data = await suggestWithGemini(filters);
       const base = data.length ? data : demoOutfits();
 
-      // Hydration with robust fallback buy links
+      // ------ Hydration with robust fallback buy links ------
       const hydrated: Outfit[] = base.map((o) => {
         // Images
         const urls = o.imageUrls?.length
@@ -158,30 +158,36 @@ export default function StylistPage() {
         const queryParts = [
           o.title?.trim(),
           ...(o.tags ?? []),
-          style,
-          occasion,
-          season,
+          style, occasion, season,
         ].filter(Boolean);
 
         const searchQuery =
           queryParts.join(" ").trim() ||
           `${style || "outfit"} ${occasion || ""} ${season || ""} outfit`.trim();
 
-        const fallbackLinks = wantLinks
-          ? [{
-              label: "See similar",
-              url: `https://www.google.com/search?q=${encodeURIComponent(searchQuery)}&tbm=shop`,
-              retailer: "Google Shopping",
-            }]
+        const googleShop = {
+          label: "See similar",
+          url: `https://www.google.com/search?q=${encodeURIComponent(searchQuery)}&tbm=shop`,
+          retailer: "Google Shopping",
+        };
+        const asosSearch = {
+          label: "Browse on ASOS",
+          url: `https://www.asos.com/search/?q=${encodeURIComponent(searchQuery)}`,
+          retailer: "ASOS",
+        };
+
+        // Filter any invalid links the model might return
+        const rawLinks = Array.isArray(o.buyLinks)
+          ? o.buyLinks.filter((l) => l && typeof l.url === "string" && l.url.startsWith("http"))
           : [];
 
-        const buyLinks =
-          wantLinks && Array.isArray(o.buyLinks) && o.buyLinks.length
-            ? o.buyLinks
-            : fallbackLinks;
+        const buyLinks = wantLinks
+          ? (rawLinks.length ? rawLinks : [googleShop, asosSearch])
+          : [];
 
         return { ...o, imageUrls: urls, buyLinks };
       });
+      // ------------------------------------------------------
 
       setOutfits(hydrated);
     } catch {
@@ -237,8 +243,7 @@ export default function StylistPage() {
     );
   }
 
-
-  // Show onboarding only after login and if not completed
+  // Onboarding only after login and if not completed
   useEffect(() => {
     const key = doneKey(user?.uid);
     if (!key) return;
@@ -246,7 +251,7 @@ export default function StylistPage() {
     setShowOnboarding(!done);
   }, [user]);
 
-  // Seed defaults from any previous onboarding snapshot
+  // Seed defaults from previous onboarding snapshot
   useEffect(() => {
     const k = dataKey(user?.uid);
     if (!k) return;
@@ -290,6 +295,12 @@ export default function StylistPage() {
         setCloset={setCloset}
         saved={saved}
         setSaved={setSaved}
+        currentUser={user}
+        onSignOut={async () => {
+          await signOut();
+          // optional: force landing after sign-out
+          // window.location.assign("/");
+        }}
       />
 
       {/* Main content */}
@@ -440,7 +451,7 @@ export default function StylistPage() {
         </div>
       </div>
 
-      {/* 🎯 Onboarding modal (only after login, and only once per user unless reset) */}
+      {/* 🧭 Onboarding modal */}
       {user && showOnboarding && (
         <Onboarding
           defaultValues={{
@@ -454,20 +465,15 @@ export default function StylistPage() {
             setShowOnboarding(false);
           }}
           onComplete={(values) => {
-            // persist snapshot
             localStorage.setItem(doneKey(user.uid), "1");
             localStorage.setItem(dataKey(user.uid), JSON.stringify(values));
 
-            // apply to current page state so badges reflect it immediately
             if (values.styles?.[0]) setStyle(values.styles[0]);
             if (values.occasions?.[0]) setOccasion(values.occasions[0]);
             if (values.seasons?.[0]) setSeason(values.seasons[0]);
             if (values.colors?.length) setPalette(values.colors);
 
             setShowOnboarding(false);
-
-            // Optional: auto-generate suggestions right after onboarding
-            // handleSuggest();
           }}
         />
       )}
@@ -477,7 +483,16 @@ export default function StylistPage() {
 
 function demoOutfits(): Outfit[] {
   return [
-    { id:"1", title:"Monochrome layers", subtitle:"Black denim + charcoal knit + chunky sneakers", tags:["Smart casual","Fall","Monochrome"], score:92 },
+    {
+      id:"1",
+      title:"Monochrome layers",
+      subtitle:"Black denim + charcoal knit + chunky sneakers",
+      tags:["Smart casual","Fall","Monochrome"],
+      score:92,
+      buyLinks: [
+        { label: "See similar", url: "https://www.google.com/search?q=monochrome+fall+smart+casual+outfit&tbm=shop", retailer: "Google Shopping" }
+      ]
+    },
     { id:"2", title:"Soft neutrals", subtitle:"Oat tee, stone chinos, white trainers", tags:["Minimal","Spring","Light palette"], score:88 },
     { id:"3", title:"Street pop", subtitle:"Boxy tee, cargo pants, bright accents", tags:["Streetwear","Summer"], score:84 },
     { id:"4", title:"Elevated basics", subtitle:"Navy blazer, tee, tapered jeans", tags:["Classic","All-season"], score:86 },

@@ -1,19 +1,29 @@
+// src/PersonalStylistUI/LeftNav.tsx
 import React, { useMemo, useState } from "react";
-import { X, Plus } from "lucide-react";
+import { X, Plus, LogOut } from "lucide-react";
 import type { ClosetItem, Outfit } from "@/types";
 import Sidebar from "./Sidebar";
 import { Link } from "react-router-dom";
 import { slugify } from "@/utils/slug";
+// type-only import for Firebase user
+import type { User as FirebaseUser } from "firebase/auth";
 
 type LeftNavProps = {
   open: boolean;
   onClose: () => void;
+
   palette: string[];
   setPalette: React.Dispatch<React.SetStateAction<string[]>>;
+
   closet: ClosetItem[];
   setCloset: (fn: (prev: ClosetItem[]) => ClosetItem[]) => void;
+
   saved: Outfit[];
   setSaved: (fn: (prev: Outfit[]) => Outfit[]) => void;
+
+  // NEW:
+  currentUser?: FirebaseUser | null;
+  onSignOut?: () => void | Promise<void>;
 };
 
 export default function LeftNav({
@@ -25,6 +35,8 @@ export default function LeftNav({
   setCloset,
   saved,
   setSaved,
+  currentUser,
+  onSignOut,
 }: LeftNavProps) {
   const [showProfile] = useState(true);
 
@@ -64,16 +76,22 @@ export default function LeftNav({
     if ((e.key === "Enter" || e.key === " ") && valid) onAddClick();
   };
 
-  const presets = [
-    "#000000",
-    "#FFFFFF",
-    "#EAB308",
+  const presets = ["#000000", "#FFFFFF", "#EAB308", "#14B8A6", "#F97316"];
 
-    "#14B8A6",
-    "#F97316",
-  ];
+  // --- user helpers (avatar + name) ---
+const displayName =
+  currentUser?.displayName ||
+  currentUser?.email?.split("@")[0] ||
+  "You";
 
-  // Sidebar sits below the 56px TopBar
+const initials = displayName
+  .split(/\s+/)
+  .map((p) => p[0])
+  .slice(0, 2)
+  .join("")
+  .toUpperCase();
+
+
   return (
     <>
       {/* Mobile overlay (below the top bar) */}
@@ -112,7 +130,7 @@ export default function LeftNav({
 
         {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto">
-          {/* Profile */}
+          {/* Profile (your existing Sidebar component) */}
           {showProfile && (
             <div className="border-b border-zinc-200 p-3">
               <Sidebar />
@@ -121,7 +139,7 @@ export default function LeftNav({
 
           {/* Sections */}
           <div className="p-3 space-y-8">
-            {/* 🎨 Color Palette */}
+            {/*  Color Palette */}
             <section>
               <h3 className="text-sm font-semibold text-zinc-800 mb-2">
                 Color palette
@@ -165,7 +183,7 @@ export default function LeftNav({
                 ))}
               </div>
 
-              {/* color input + hex input + add */}
+              {/* color + hex + add */}
               <div className="flex items-center gap-2">
                 <input
                   type="color"
@@ -194,7 +212,7 @@ export default function LeftNav({
               </div>
             </section>
 
-            {/* 👗 Closet */}
+            {/*  Closet */}
             <section>
               <div className="flex items-center justify-between mb-1">
                 <h3 className="text-sm font-semibold text-zinc-800">Your closet</h3>
@@ -249,7 +267,7 @@ export default function LeftNav({
               </div>
             </section>
 
-            {/* ❤️ Saved */}
+            {/*  Saved */}
             <section>
               <div className="mb-2 flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-zinc-800">Saved outfits</h3>
@@ -328,6 +346,40 @@ export default function LeftNav({
             </section>
           </div>
         </div>
+
+{/* ─── Sticky footer: current user + Sign out ─── */}
+{currentUser && (
+  <div className="border-t border-zinc-200 p-3 bg-white">
+    <div className="flex items-center gap-2">
+      <div className="h-8 w-8 rounded-full bg-zinc-200 grid place-items-center text-xs font-semibold text-zinc-800">
+        {initials}
+      </div>
+
+      <div className="flex-1 min-w-0">
+        <div className="truncate text-sm font-medium text-zinc-800">
+          {displayName}
+        </div>
+        {currentUser.email && (
+          <div className="truncate text-[11px] text-zinc-500">
+            {currentUser.email}
+          </div>
+        )}
+      </div>
+
+      {onSignOut && (
+        <button
+          onClick={onSignOut}
+          className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs hover:bg-zinc-50"
+          title="Sign out"
+        >
+          <LogOut className="h-3.5 w-3.5" />
+          Sign out
+        </button>
+      )}
+    </div>
+  </div>
+)}
+
       </aside>
     </>
   );
