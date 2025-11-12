@@ -1,20 +1,32 @@
+// src/PersonalStylistUI/OutfitCard.tsx
 import { useState } from "react";
-import { Heart, Star, Info } from "lucide-react";
+import { Heart, Star, Info, Check, X } from "lucide-react";
 import type { Outfit } from "@/types";
+
+type Props = {
+  outfit: Outfit;
+  onSave: (o: Outfit) => void;
+  onToggleFavorite: (id: string) => void;
+  // verdict is optional; if the parent doesn’t care, no buttons are shown
+  onVerdict?: (v: "accepted" | "rejected") => void;
+  showBuyLinks?: boolean;
+};
 
 export default function OutfitCard({
   outfit,
   onSave,
   onToggleFavorite,
-  showBuyLinks = true, // NEW: allow hiding links (e.g., closet_only)
-}: {
-  outfit: Outfit;
-  onSave: (o: Outfit) => void;
-  onToggleFavorite: (id: string) => void;
-  onVerdict?: (id: string, v: "accepted" | "rejected") => void;
-  showBuyLinks?: boolean;
-}) {
+  onVerdict,
+  showBuyLinks = true,
+}: Props) {
   const [openWhy, setOpenWhy] = useState(false);
+
+  const verdictLabel =
+    outfit.verdict === "accepted"
+      ? "Accepted"
+      : outfit.verdict === "rejected"
+      ? "Rejected"
+      : null;
 
   return (
     <div className="group rounded-2xl border border-zinc-200 bg-white overflow-hidden">
@@ -23,9 +35,23 @@ export default function OutfitCard({
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <div className="font-medium truncate">{outfit.title}</div>
-            <div className="text-xs text-zinc-600 line-clamp-2">{outfit.subtitle}</div>
+            <div className="text-xs text-zinc-600 line-clamp-2">
+              {outfit.subtitle}
+            </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            {verdictLabel && (
+              <span
+                className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] ${
+                  outfit.verdict === "accepted"
+                    ? "bg-emerald-600/10 text-emerald-700 border border-emerald-200"
+                    : "bg-rose-600/10 text-rose-700 border border-rose-200"
+                }`}
+              >
+                {verdictLabel}
+              </span>
+            )}
+
             <div className="inline-flex items-center gap-1 rounded-full bg-emerald-600/10 px-2 py-1 text-[10px] text-emerald-700">
               {outfit.score}% match
             </div>
@@ -36,8 +62,12 @@ export default function OutfitCard({
               onClick={() => onToggleFavorite(outfit.id)}
               aria-label="favorite"
               title={outfit.isFavorite ? "Unfavorite" : "Favorite"}
+              type="button"
             >
-              <Heart className="h-4 w-4" fill={outfit.isFavorite ? "currentColor" : "none"} />
+              <Heart
+                className="h-4 w-4"
+                fill={outfit.isFavorite ? "currentColor" : "none"}
+              />
             </button>
           </div>
         </div>
@@ -48,7 +78,10 @@ export default function OutfitCard({
         {/* Tags + confidence */}
         <div className="flex flex-wrap items-center gap-2">
           {outfit.tags.map((t) => (
-            <span key={t} className="rounded-md bg-zinc-100 px-2 py-1 text-[10px]">
+            <span
+              key={t}
+              className="rounded-md bg-zinc-100 px-2 py-1 text-[10px]"
+            >
               {t}
             </span>
           ))}
@@ -60,18 +93,22 @@ export default function OutfitCard({
         </div>
 
         {/* Why this? */}
-        {(outfit.explanation || (outfit.highlights && outfit.highlights.length)) && (
+        {(outfit.explanation ||
+          (outfit.highlights && outfit.highlights.length)) && (
           <>
             <button
               className="text-xs text-blue-600 hover:underline inline-flex items-center gap-1"
               onClick={() => setOpenWhy((s) => !s)}
+              type="button"
             >
               <Info className="h-4 w-4" />
               Why this?
             </button>
             {openWhy && (
               <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3 text-sm">
-                {outfit.explanation && <p className="text-zinc-700">{outfit.explanation}</p>}
+                {outfit.explanation && (
+                  <p className="text-zinc-700">{outfit.explanation}</p>
+                )}
                 {!!outfit.highlights?.length && (
                   <ul className="mt-2 list-disc pl-5 text-zinc-700">
                     {outfit.highlights.map((h) => (
@@ -110,9 +147,31 @@ export default function OutfitCard({
           <button
             className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-100 px-3 py-1.5 text-xs hover:bg-zinc-200"
             onClick={() => onSave(outfit)}
+            type="button"
           >
             <Star className="h-4 w-4" /> Save
           </button>
+
+          {onVerdict && (
+            <>
+              <button
+                type="button"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600/10 text-emerald-700 px-3 py-1.5 text-xs hover:bg-emerald-600/20"
+                onClick={() => onVerdict("accepted")}
+              >
+                <Check className="h-4 w-4" />
+                Accept
+              </button>
+              <button
+                type="button"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-rose-600/10 text-rose-700 px-3 py-1.5 text-xs hover:bg-rose-600/20"
+                onClick={() => onVerdict("rejected")}
+              >
+                <X className="h-4 w-4" />
+                Reject
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

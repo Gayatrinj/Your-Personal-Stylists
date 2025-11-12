@@ -1,4 +1,5 @@
 // src/types.ts
+
 export type BuyLink = {
   label: string;
   url: string;
@@ -31,12 +32,36 @@ export type Outfit = {
   verdict?: "accepted" | "rejected" | null; // swipe / decision
 };
 
+// shared between StylistPage, SuggestControls, API filters
+export type SourceMode = "shop_anywhere" | "prefer_closet" | "closet_only";
+
+// match how you use Profile in StylistPage
+export type Profile = {
+  gender?: string;
+  heightCm?: number;
+  bodyType?: string;
+  notes?: string;
+};
+
+// 🔧 NEW shape for filters, no style/season/occasion
 export type SuggestFilters = {
+  // full system prompt you build in buildPrompt()
   prompt: string;
-  style: string;
-  season: string;
-  occasion: string;
+
+  // optional raw user prompt if you want it
+  userPrompt?: string;
+
   palette?: string[];
+  profile?: Profile;
+  source?: SourceMode;
+  closetSummary?: string;
+  closetImages?: string[];
+
+  // sliders
+  controls?: {
+    casualFormal: number;
+    playfulPro: number;
+  };
 };
 
 export type ClosetItem = {
@@ -44,14 +69,4 @@ export type ClosetItem = {
   name: string;
   type: string;
   image?: string;
-};
-
-export type Profile = {
-  name?: string;
-  gender?: "female" | "male" | "nonbinary" | "prefer_not_say";
-  heightCm?: number;
-  bodyType?: "petite" | "average" | "athletic" | "curvy" | "plus" | "slim" | "broad" | "other";
-  fitPrefs?: string[];       
-  measurements?: { bust?: number; waist?: number; hips?: number; chest?: number; inseam?: number };
-  notes?: string;
 };

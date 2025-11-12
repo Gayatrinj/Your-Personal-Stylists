@@ -6,7 +6,7 @@ import UploadArea from "./UploadArea";
 import OutfitCard from "./OutfitCard";
 import LeftNav from "./LeftNav";
 import ControlsBar from "./ControlsBar";
-import type { Outfit, ClosetItem, Profile } from "@/types";
+import type { Outfit, ClosetItem, Profile, SourceMode } from "@/types";
 import { useLocalStorage } from "@/hooks/useLocalStorage";
 import { suggestWithGemini } from "@/api/suggest";
 import { Menu, Loader2, LogIn } from "lucide-react";
@@ -17,29 +17,27 @@ import { Onboarding } from "@/onboarding/Onboarding";
 import type { OnboardingData } from "@/onboarding/Onboarding";
 
 type Controls = { casualFormal: number; playfulPro: number };
-type SourceMode = "shop_anywhere" | "prefer_closet" | "closet_only";
-
-const STYLES = ["Smart casual","Minimal","Streetwear","Classic","Y2K","Boho","Athleisure"];
-const OCCASIONS = ["Dinner","Party","Office","Date","Travel","Wedding guest"];
-const SEASONS = ["Spring","Summer","Fall","Winter"];
-
-function rationaleForBodyType(bt?: Profile["bodyType"]) {
-  switch (bt) {
-    case "petite":   return "Petite fit: higher rises, cropped lengths, clean vertical lines to elongate.";
-    case "average":  return "Balanced fit: classic proportions, mid-rise, versatile lengths.";
-    case "athletic": return "Athletic fit: add shape with structured tops; straight/tapered lines define the waist.";
-    case "curvy":    return "Curvy fit: waist emphasis, wrap/fit-and-flare shapes, soft drape over hips.";
-    case "plus":     return "Plus fit: defined waist, fluid fabrics, vertical seams to streamline.";
-    case "slim":     return "Slim fit: layer for volume, relaxed cuts, mid-rise to balance proportions.";
-    case "broad":    return "Broad frame: soften shoulders (raglan/knits), straight legs to balance the top.";
-    case "other":    return "Customized fit: balanced proportions and comfortable silhouettes.";
-    default:         return null;
-  }
-}
 
 // localStorage keys scoped per user
 const doneKey = (uid?: string) => (uid ? `onboarding_done_${uid}` : "");
 const dataKey = (uid?: string) => (uid ? `onboarding_data_${uid}` : "");
+
+// 🔍 Infer gender directly from the user prompt text
+function inferGenderFromPrompt(text: string | undefined): Profile["gender"] | undefined {
+  if (!text) return undefined;
+  const p = text.toLowerCase();
+
+  if (p.includes(" nonbinary") || p.includes(" non-binary") || p.includes(" genderfluid")) {
+    return "non-binary" as Profile["gender"];
+  }
+  if (p.includes(" female") || p.includes(" woman") || p.includes(" girl") || p.includes(" women")) {
+    return "female" as Profile["gender"];
+  }
+  if (p.includes(" male") || p.includes(" man") || p.includes(" guy") || p.includes(" boy") || p.includes(" men")) {
+    return "male" as Profile["gender"];
+  }
+  return undefined;
+}
 
 export default function StylistPage() {
   // Auth
@@ -48,11 +46,8 @@ export default function StylistPage() {
   // Onboarding visibility
   const [showOnboarding, setShowOnboarding] = useState(false);
 
-  // filters
+  // 🔹 Free-text prompt only
   const [prompt, setPrompt] = useState("");
-  const [style, setStyle] = useState("Smart casual");
-  const [occasion, setOccasion] = useState("Dinner");
-  const [season, setSeason] = useState("Fall");
 
   const [provider] = useState<"gemini">("gemini");
 
@@ -60,12 +55,25 @@ export default function StylistPage() {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const [palette, setPalette] = useLocalStorage<string[]>("palette", ["#E3E1FF","#D0F4DE","#FEE7AE","#FFC2C7","#B9E3FF"]);
-  const [closet, setCloset] = useLocalStorage<ClosetItem[]>("closet", []);
-  const [saved, setSaved] = useLocalStorage<Outfit[]>("savedOutfits", []);
+  // Palette still used for onboarding + prompt context (no visible UI here)
+  const [palette, setPalette] = useLocalStorage<string[]>("palette", [
+    "#E3E1FF", "#D0F4DE", "#FEE7AE", "#FFC2C7", "#B9E3FF",
+  ]);
 
+  // ⬇️ Two separate stores:
+  // 1) savedOutfits → feeds LeftNav sidebar (only when user clicks explicit Save)
+  // 2) savedLibrary → feeds Saved page (favorites/accepts AND saves)
+  const [saved, setSaved] = useLocalStorage<Outfit[]>("savedOutfits", []);
+  const [library, setLibrary] = useLocalStorage<Outfit[]>("savedLibrary", []);
+
+  const [closet, setCloset] = useLocalStorage<ClosetItem[]>("closet", []);
+
+  // lightweight profile remains (height/bodyType/notes only)
   const [profile] = useLocalStorage<Profile>("profile", {
-    gender: undefined, heightCm: undefined, bodyType: undefined, notes: "",
+    gender: undefined,
+    heightCm: undefined,
+    bodyType: undefined,
+    notes: "",
   });
 
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -74,26 +82,35 @@ export default function StylistPage() {
   // where to source suggestions
   const [source, setSource] = useState<SourceMode>("shop_anywhere");
 
-  const [lastContext, setLastContext] = useState<{
-    profile?: Profile; palette?: string[]; style?: string; occasion?: string; season?: string; controls?: Controls; source?: SourceMode;
-  } | null>(null);
+  // ❗ effective gender comes ONLY from the prompt now
+  const effectiveGender: Profile["gender"] | undefined = inferGenderFromPrompt(prompt);
+
+  // 🔔 lightweight toast for UX
+  const [toast, setToast] = useState<{ msg: string; visible: boolean }>({ msg: "", visible: false });
+  const showToast = (msg: string) => {
+    setToast({ msg, visible: true });
+    window.clearTimeout((showToast as any)._t);
+    (showToast as any)._t = window.setTimeout(() => setToast({ msg: "", visible: false }), 1800);
+  };
 
   // Closet helpers
   const closetImages = useMemo(
-    () => closet.filter(i => i.image).map(i => i.image!) as string[],
+    () => closet.filter((i) => i.image).map((i) => i.image!) as string[],
     [closet]
   );
   const closetSummary = useMemo(() => {
     if (!closet.length) return "No items uploaded.";
     const byType: Record<string, number> = {};
-    closet.forEach(c => { byType[c.type] = (byType[c.type] ?? 0) + 1; });
-    const parts = Object.entries(byType).map(([k,v]) => `${k}×${v}`);
+    closet.forEach((c) => {
+      byType[c.type] = (byType[c.type] ?? 0) + 1;
+    });
+    const parts = Object.entries(byType).map(([k, v]) => `${k}×${v}`);
     return `${closet.length} items (${parts.join(", ")})`;
   }, [closet]);
 
   function profileToText(p: Profile) {
     const bits: string[] = [];
-    if (p.gender)   bits.push(`gender: ${p.gender}`);
+    // intentionally NOT using p.gender anymore (gender comes from prompt)
     if (p.heightCm) bits.push(`height: ${p.heightCm}cm`);
     if (p.bodyType) bits.push(`body type: ${p.bodyType}`);
     if (p.notes?.trim()) bits.push(`notes: ${p.notes.trim()}`);
@@ -103,22 +120,62 @@ export default function StylistPage() {
   function buildPrompt() {
     const profileTxt = profileToText(profile);
     const paletteTxt = palette.length ? palette.join(", ") : "no preference";
+    const userPrompt =
+      prompt?.trim() || "No extra style prompt provided. Suggest versatile looks.";
+
+    // 🔒 Strong, mode-specific source policy
     const sourceLine =
       source === "shop_anywhere"
-        ? "Source policy: You may mix closet items with new shopping suggestions."
+        ? "Source policy: You may mix the user's closet items with new shopping suggestions."
         : source === "prefer_closet"
-        ? "Source policy: Prefer the user's closet items; only add new shopping items to complete looks."
-        : "Source policy: Use only the user's closet items. If a look is impossible, say which item is missing.";
+        ? [
+            "Source policy: Prefer the user's closet items; only add new shopping items if necessary to complete the look.",
+            "When you add a new item, explain why it's needed (e.g., 'Missing a layer: …')."
+          ].join(" ")
+        : [
+            "Source policy: CLOSET ONLY. Use only items that could plausibly exist in the closet described by closetSummary/closetImages.",
+            "If something is missing, do NOT recommend external products. Instead respond with a clear 'Missing:' note (e.g., 'Missing: black belt').",
+            "Do NOT include shopping links."
+          ].join(" ");
+
+    // 🧭 Gender guardrails from the prompt
+    const genderRule = (() => {
+      if (!effectiveGender) return null;
+      const g = String(effectiveGender).toLowerCase();
+
+      if (g.includes("male") || g === "man" || g === "men") {
+        return [
+          "The wearer is MALE.",
+          "You MUST ONLY suggest menswear silhouettes and items (men's shirts, men's trousers, men's coats, etc.).",
+          "Do NOT suggest womenswear (dresses, skirts, heels, women's blouses) unless explicitly asked.",
+          "Do NOT mix genders in a single suggestion."
+        ].join(" ");
+      }
+
+      if (g.includes("female") || g === "woman" || g === "women") {
+        return [
+          "The wearer is FEMALE.",
+          "You MUST ONLY suggest womenswear silhouettes and items (women's tops, dresses, skirts, women's trousers, etc.).",
+          "Do NOT suggest menswear unless explicitly asked.",
+          "Do NOT mix genders in a single suggestion."
+        ].join(" ");
+      }
+
+      return `Outfits must respect the user's stated gender identity: ${effectiveGender}. Avoid mixing outfits for different genders unless explicitly requested.`;
+    })();
+
     return [
       `You are a stylist. Prioritize body type fit & proportions.`,
       `User profile → ${profileTxt}.`,
-      `Context: style=${style}, occasion=${occasion}, season=${season}.`,
+      genderRule,
+      `User request: ${userPrompt}`,
       `Palette preference: ${paletteTxt}.`,
       `Closet summary: ${closetSummary}.`,
       sourceLine,
-      prompt?.trim() ? `Extra notes: ${prompt.trim()}` : null,
       `Return outfits that flatter the specified body type. If guidance conflicts, favor body-type-friendly choices (silhouette, rise, lengths, cuts).`,
-    ].filter(Boolean).join("\n");
+    ]
+      .filter(Boolean)
+      .join("\n");
   }
 
   async function handleSuggest() {
@@ -134,36 +191,41 @@ export default function StylistPage() {
 
       const filters = {
         prompt: buildPrompt(),
-        style, season, occasion, palette, controls, profile,
+        palette,
+        controls,
+        profile,
         source,
         closetSummary,
         closetImages,
+        userPrompt: prompt,
       };
-      setLastContext({ profile, palette, style, occasion, season, controls, source });
 
       const data = await suggestWithGemini(filters);
       const base = data.length ? data : demoOutfits();
 
       // ------ Hydration with robust fallback buy links ------
       const hydrated: Outfit[] = base.map((o) => {
-        // Images
+        // Images: show closet pieces in non-shop-anywhere modes
         const urls = o.imageUrls?.length
           ? o.imageUrls
-          : (source !== "shop_anywhere" ? closetImages.slice(0, 9) : []);
+          : source !== "shop_anywhere"
+          ? closetImages.slice(0, 9)
+          : [];
 
-        // Decide if we want links (not in closet_only)
+        // Links policy
         const wantLinks = source !== "closet_only";
 
-        // Build a strong query even when prompt is empty
-        const queryParts = [
-          o.title?.trim(),
-          ...(o.tags ?? []),
-          style, occasion, season,
-        ].filter(Boolean);
-
+        // Build shopping search query (scoped by gender term if known)
+        const queryParts = [o.title?.trim(), ...(o.tags ?? []), prompt?.trim()].filter(Boolean);
+        let genderTerm = "";
+        if (effectiveGender) {
+          const g = effectiveGender.toLowerCase();
+          if (g.includes("male") || g === "man" || g === "men") genderTerm = "men";
+          else if (g.includes("female") || g === "woman" || g === "women") genderTerm = "women";
+        }
         const searchQuery =
-          queryParts.join(" ").trim() ||
-          `${style || "outfit"} ${occasion || ""} ${season || ""} outfit`.trim();
+          [genderTerm, ...queryParts].filter(Boolean).join(" ").trim() ||
+          (genderTerm ? `${genderTerm} versatile everyday outfit ideas` : "versatile everyday outfit ideas");
 
         const googleShop = {
           label: "See similar",
@@ -176,14 +238,11 @@ export default function StylistPage() {
           retailer: "ASOS",
         };
 
-        // Filter any invalid links the model might return
         const rawLinks = Array.isArray(o.buyLinks)
           ? o.buyLinks.filter((l) => l && typeof l.url === "string" && l.url.startsWith("http"))
           : [];
 
-        const buyLinks = wantLinks
-          ? (rawLinks.length ? rawLinks : [googleShop, asosSearch])
-          : [];
+        const buyLinks = wantLinks ? (rawLinks.length ? rawLinks : [googleShop, asosSearch]) : [];
 
         return { ...o, imageUrls: urls, buyLinks };
       });
@@ -197,8 +256,119 @@ export default function StylistPage() {
     }
   }
 
+  // ---------- Saved list (sidebar) : UPSERT helper ----------
+  function upsertSaved(update: Outfit) {
+    setSaved(prev => {
+      const idx = prev.findIndex(p => p.id === update.id);
+      const merged: Outfit = idx === -1
+        ? update
+        : {
+            ...prev[idx],
+            ...update,
+            savedMeta: {
+              ...prev[idx].savedMeta,
+              ...update.savedMeta,
+              categories: Array.from(
+                new Set([
+                  ...(prev[idx].savedMeta?.categories ?? []),
+                  ...(update.savedMeta?.categories ?? []),
+                ])
+              ),
+            },
+          };
+    if (idx === -1) return [merged, ...prev];
+      const next = [...prev];
+      next[idx] = merged;
+      return next;
+    });
+  }
+
+  // ---------- Library (Saved page) : UPSERT helper ----------
+  function upsertLibrary(update: Outfit) {
+    setLibrary(prev => {
+      const idx = prev.findIndex(p => p.id === update.id);
+      const merged: Outfit = idx === -1
+        ? update
+        : {
+            ...prev[idx],
+            ...update,
+            savedMeta: {
+              ...prev[idx].savedMeta,
+              ...update.savedMeta,
+              categories: Array.from(
+                new Set([
+                  ...(prev[idx].savedMeta?.categories ?? []),
+                  ...(update.savedMeta?.categories ?? []),
+                ])
+              ),
+            },
+          };
+      if (idx === -1) return [merged, ...prev];
+      const next = [...prev];
+      next[idx] = merged;
+      return next;
+    });
+  }
+
+  // ⭐ Favorite toggle — updates suggestions + LIBRARY ONLY
   function handleToggleFavorite(id: string) {
-    setOutfits(prev => prev.map(o => (o.id === id ? { ...o, isFavorite: !o.isFavorite } : o)));
+    // Update in suggestions list
+    setOutfits(prev =>
+      prev.map(o => (o.id === id ? { ...o, isFavorite: !o.isFavorite } : o))
+    );
+
+    // Upsert into library (Saved page), NOT sidebar
+    const curr = outfits.find(o => o.id === id);
+    if (curr) {
+      const nextFav = !curr.isFavorite;
+      const categories = curr.tags ?? [];
+      upsertLibrary({
+        ...curr,
+        isFavorite: nextFav,
+        savedMeta: {
+          ...curr.savedMeta,
+          categories: Array.from(new Set([...(curr.savedMeta?.categories ?? []), ...categories])),
+        },
+      });
+      showToast(nextFav ? "Added to Saved outfits page" : "Removed favorite (still on Saved page if previously saved)");
+    }
+  }
+
+  // 💾 Explicit Save button — pins to sidebar AND library
+  function handleSave(oo: Outfit) {
+    const categories = oo.tags ?? [];
+    const enriched: Outfit = {
+      ...oo,
+      savedMeta: {
+        ...oo.savedMeta,
+        categories: Array.from(new Set([...(oo.savedMeta?.categories ?? []), ...categories])),
+      },
+    };
+    upsertSaved(enriched);   // sidebar
+    upsertLibrary(enriched); // saved page
+    showToast("Saved — added to sidebar and Saved page");
+  }
+
+  // ✅/❌ Verdict — updates suggestions + LIBRARY ONLY
+  function handleVerdict(id: string, verdict: "accepted" | "rejected") {
+    // mark in suggestions
+    setOutfits(prev => prev.map(o => (o.id === id ? { ...o, verdict } : o)));
+
+    // upsert in library (Saved page), not sidebar
+    const curr = outfits.find(o => o.id === id);
+    if (curr) {
+      const categories = curr.tags ?? [];
+      upsertLibrary({
+        ...curr,
+        verdict,
+        savedMeta: {
+          ...curr.savedMeta,
+          categories: Array.from(new Set([...(curr.savedMeta?.categories ?? []), ...categories])),
+        },
+      });
+      if (verdict === "accepted") showToast("Accepted — added to Saved outfits page");
+      if (verdict === "rejected") showToast("Rejected (kept on Saved page if previously saved)");
+    }
   }
 
   async function handleSurprise() {
@@ -251,7 +421,7 @@ export default function StylistPage() {
     setShowOnboarding(!done);
   }, [user]);
 
-  // Seed defaults from previous onboarding snapshot
+  // Seed defaults from previous onboarding snapshot (only colors now)
   useEffect(() => {
     const k = dataKey(user?.uid);
     if (!k) return;
@@ -259,9 +429,6 @@ export default function StylistPage() {
     if (!raw) return;
     try {
       const d = JSON.parse(raw) as OnboardingData;
-      if (Array.isArray(d.styles) && d.styles[0]) setStyle(d.styles[0]);
-      if (Array.isArray(d.occasions) && d.occasions[0]) setOccasion(d.occasions[0]);
-      if (Array.isArray(d.seasons) && d.seasons[0]) setSeason(d.seasons[0]);
       if (Array.isArray(d.colors) && d.colors.length) setPalette(d.colors);
     } catch {
       // ignore parse errors
@@ -281,16 +448,14 @@ export default function StylistPage() {
             type: "Photo",
             image: URL.createObjectURL(f),
           }));
-          setCloset(prev => [...newItems, ...prev]);
+          setCloset((prev) => [...newItems, ...prev]);
         }}
       />
 
-      {/* Left Nav */}
+      {/* Left Nav (sidebar shows ONLY explicit saves via `savedOutfits`) */}
       <LeftNav
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
-        palette={palette}
-        setPalette={setPalette}
         closet={closet}
         setCloset={setCloset}
         saved={saved}
@@ -298,7 +463,6 @@ export default function StylistPage() {
         currentUser={user}
         onSignOut={async () => {
           await signOut();
-          // optional: force landing after sign-out
           // window.location.assign("/");
         }}
       />
@@ -318,44 +482,16 @@ export default function StylistPage() {
         {/* Centered main content */}
         <div className="mx-auto w-full max-w-6xl px-4 sm:px-6">
           <main className="py-6 space-y-6">
+            {/* Controls: prompt + source mode only */}
             <SuggestControls
-              prompt={prompt} setPrompt={setPrompt}
-              style={style} setStyle={setStyle} styles={STYLES}
-              occasion={occasion} setOccasion={setOccasion} occasions={OCCASIONS}
-              season={season} setSeason={setSeason} seasons={SEASONS}
-              loading={loading} errorMsg={errorMsg} onSuggest={handleSuggest}
-              source={source} setSource={setSource}
+              prompt={prompt}
+              setPrompt={setPrompt}
+              loading={loading}
+              errorMsg={errorMsg}
+              onSuggest={handleSuggest}
+              source={source}
+              setSource={setSource}
             />
-
-            {(source === "prefer_closet" || source === "closet_only") && closet.length === 0 && (
-              <div className="rounded-lg border border-amber-300 bg-amber-50 text-amber-900 px-3 py-2 text-sm">
-                No items in your closet. Add items to your closet or switch source to “Shop anywhere”.
-              </div>
-            )}
-
-            {/* Preferences summary pills */}
-            <div className="flex flex-wrap items-center gap-2 -mt-2">
-              {profile.bodyType && (
-                <span className="inline-flex items-center rounded-full bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200 px-2.5 py-1 text-xs">
-                  Body type: {profile.bodyType}
-                </span>
-              )}
-              {profile.gender && (
-                <span className="inline-flex items-center rounded-full bg-zinc-100 text-zinc-800 px-2.5 py-1 text-xs">
-                  Gender: {profile.gender}
-                </span>
-              )}
-              {profile.heightCm && (
-                <span className="inline-flex items-center rounded-full bg-zinc-100 text-zinc-800 px-2.5 py-1 text-xs">
-                  Height: {profile.heightCm}cm
-                </span>
-              )}
-              <span className="inline-flex items-center rounded-full bg-zinc-100 text-zinc-800 px-2.5 py-1 text-xs">Style: {style}</span>
-              <span className="inline-flex items-center rounded-full bg-zinc-100 text-zinc-800 px-2.5 py-1 text-xs">Occasion: {occasion}</span>
-              <span className="inline-flex items-center rounded-full bg-zinc-100 text-zinc-800 px-2.5 py-1 text-xs">Season: {season}</span>
-              <span className="inline-flex items-center rounded-full bg-zinc-100 text-zinc-800 px-2.5 py-1 text-xs">Palette: {palette.length} colors</span>
-              <span className="inline-flex items-center rounded-full bg-zinc-100 text-zinc-800 px-2.5 py-1 text-xs">Sliders: C/F {controls.casualFormal} · P/Pro {controls.playfulPro}</span>
-            </div>
 
             <ControlsBar value={controls} onChange={setControls} onRandomize={handleSurprise} />
 
@@ -368,10 +504,17 @@ export default function StylistPage() {
                     type: "Photo",
                     image: URL.createObjectURL(f),
                   }));
-                  setCloset(prev => [...newItems, ...prev]);
+                  setCloset((prev) => [...newItems, ...prev]);
                 }}
               />
             </div>
+
+            {/* Closet warning when source requires closet */}
+            {(source === "prefer_closet" || source === "closet_only") && closet.length === 0 && (
+              <div className="rounded-lg border border-amber-300 bg-amber-50 text-amber-900 px-3 py-2 text-sm">
+                No items in your closet. Add items to your closet or switch source to “Shop anywhere”.
+              </div>
+            )}
 
             {/* Suggestions feed */}
             <section>
@@ -385,6 +528,7 @@ export default function StylistPage() {
                     </span>
                   )}
                 </div>
+
                 <button
                   onClick={handleSuggest}
                   disabled={loading}
@@ -395,54 +539,25 @@ export default function StylistPage() {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-                {outfits.map((o) => {
-                  const rationale = rationaleForBodyType(profile.bodyType);
-                  return (
+                {outfits.length === 0 ? (
+                  <div className="col-span-full text-xs text-zinc-500">
+                    No outfits yet — try generating above.
+                  </div>
+                ) : (
+                  outfits.map((o) => (
                     <div key={o.id}>
                       <OutfitCard
                         outfit={o}
-                        onSave={(oo) => {
-                          const categories = [style, occasion, season];
-                          const enriched: Outfit = {
-                            ...oo,
-                            savedMeta: {
-                              ...oo.savedMeta,
-                              categories: Array.from(
-                                new Set([...(oo.savedMeta?.categories ?? []), ...categories])
-                              ),
-                            },
-                          };
-                          setSaved(prev =>
-                            prev.some(p => p.id === oo.id) ? prev : [enriched, ...prev]
-                          );
-                        }}
+                        onSave={handleSave}
                         onToggleFavorite={handleToggleFavorite}
-                        onVerdict={() => {}}
+                        onVerdict={(v) => v && handleVerdict(o.id, v)}
                         showBuyLinks={source !== "closet_only"} // hide links in closet-only mode
                       />
-                      {rationale && <p className="mt-1 text-xs text-zinc-600">{rationale}</p>}
                     </div>
-                  );
-                })}
+                  ))
+                )}
               </div>
             </section>
-
-            {lastContext && (
-              <details className="mt-4 text-xs text-zinc-600">
-                <summary className="cursor-pointer">Show last request context</summary>
-                <pre className="mt-2 whitespace-pre-wrap rounded-lg border border-zinc-200 bg-zinc-50 p-3">
-{JSON.stringify({
-  profile: lastContext.profile,
-  style: lastContext.style,
-  occasion: lastContext.occasion,
-  season: lastContext.season,
-  paletteCount: lastContext.palette?.length,
-  sliders: lastContext.controls,
-  source: lastContext.source,
-}, null, 2)}
-                </pre>
-              </details>
-            )}
           </main>
 
           <footer className="text-center text-xs text-zinc-500 pb-8">
@@ -451,13 +566,13 @@ export default function StylistPage() {
         </div>
       </div>
 
-      {/* 🧭 Onboarding modal */}
+      {/*  Onboarding modal */}
       {user && showOnboarding && (
         <Onboarding
           defaultValues={{
-            styles: [style],
-            occasions: [occasion],
-            seasons: [season],
+            styles: [],
+            occasions: [],
+            seasons: [],
             colors: palette,
           }}
           onSkip={() => {
@@ -467,15 +582,19 @@ export default function StylistPage() {
           onComplete={(values) => {
             localStorage.setItem(doneKey(user.uid), "1");
             localStorage.setItem(dataKey(user.uid), JSON.stringify(values));
-
-            if (values.styles?.[0]) setStyle(values.styles[0]);
-            if (values.occasions?.[0]) setOccasion(values.occasions[0]);
-            if (values.seasons?.[0]) setSeason(values.seasons[0]);
             if (values.colors?.length) setPalette(values.colors);
-
             setShowOnboarding(false);
           }}
         />
+      )}
+
+      {/* lightweight toast */}
+      {toast.visible && (
+        <div className="fixed bottom-4 right-4 z-50">
+          <div className="rounded-xl border border-zinc-200 bg-white/95 px-3 py-2 shadow-md text-sm text-zinc-800">
+            {toast.msg}
+          </div>
+        </div>
       )}
     </div>
   );
@@ -484,19 +603,53 @@ export default function StylistPage() {
 function demoOutfits(): Outfit[] {
   return [
     {
-      id:"1",
-      title:"Monochrome layers",
-      subtitle:"Black denim + charcoal knit + chunky sneakers",
-      tags:["Smart casual","Fall","Monochrome"],
-      score:92,
+      id: "1",
+      title: "Monochrome layers",
+      subtitle: "Black denim + charcoal knit + chunky sneakers",
+      tags: ["Smart casual", "Fall", "Monochrome"],
+      score: 92,
       buyLinks: [
-        { label: "See similar", url: "https://www.google.com/search?q=monochrome+fall+smart+casual+outfit&tbm=shop", retailer: "Google Shopping" }
-      ]
+        {
+          label: "See similar",
+          url: "https://www.google.com/search?q=monochrome+fall+smart+casual+outfit&tbm=shop",
+          retailer: "Google Shopping",
+        },
+      ],
     },
-    { id:"2", title:"Soft neutrals", subtitle:"Oat tee, stone chinos, white trainers", tags:["Minimal","Spring","Light palette"], score:88 },
-    { id:"3", title:"Street pop", subtitle:"Boxy tee, cargo pants, bright accents", tags:["Streetwear","Summer"], score:84 },
-    { id:"4", title:"Elevated basics", subtitle:"Navy blazer, tee, tapered jeans", tags:["Classic","All-season"], score:86 },
-    { id:"5", title:"Cozy knit set", subtitle:"Ribbed two-piece with trench", tags:["Boho","Fall"], score:80 },
-    { id:"6", title:"Athleisure city", subtitle:"Zip hoodie, leggings, runners", tags:["Athleisure","Travel"], score:83 },
+    {
+      id: "2",
+      title: "Soft neutrals",
+      subtitle: "Oat tee, stone chinos, white trainers",
+      tags: ["Minimal", "Spring", "Light palette"],
+      score: 88,
+    },
+    {
+      id: "3",
+      title: "Street pop",
+      subtitle: "Boxy tee, cargo pants, bright accents",
+      tags: ["Streetwear", "Summer"],
+      score: 84,
+    },
+    {
+      id: "4",
+      title: "Elevated basics",
+      subtitle: "Navy blazer, tee, tapered jeans",
+      tags: ["Classic", "All-season"],
+      score: 86,
+    },
+    {
+      id: "5",
+      title: "Cozy knit set",
+      subtitle: "Ribbed two-piece with trench",
+      tags: ["Boho", "Fall"],
+      score: 80,
+    },
+    {
+      id: "6",
+      title: "Athleisure city",
+      subtitle: "Zip hoodie, leggings, runners",
+      tags: ["Athleisure", "Travel"],
+      score: 83,
+    },
   ];
 }

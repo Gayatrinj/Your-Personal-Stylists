@@ -1,27 +1,22 @@
 // src/PersonalStylistUI/LeftNav.tsx
-import React, { useMemo, useState } from "react";
-import { X, Plus, LogOut } from "lucide-react";
+import { X, LogOut, FolderOpen } from "lucide-react";
 import type { ClosetItem, Outfit } from "@/types";
-import Sidebar from "./Sidebar";
-import { Link } from "react-router-dom";
+import { Link, NavLink } from "react-router-dom";
 import { slugify } from "@/utils/slug";
-// type-only import for Firebase user
 import type { User as FirebaseUser } from "firebase/auth";
+import { useLocalStorage } from "@/hooks/useLocalStorage";
 
 type LeftNavProps = {
   open: boolean;
   onClose: () => void;
 
-  palette: string[];
-  setPalette: React.Dispatch<React.SetStateAction<string[]>>;
-
   closet: ClosetItem[];
   setCloset: (fn: (prev: ClosetItem[]) => ClosetItem[]) => void;
 
+  // Sidebar “Saved outfits” (EXPLICIT saves from Save button)
   saved: Outfit[];
   setSaved: (fn: (prev: Outfit[]) => Outfit[]) => void;
 
-  // NEW:
   currentUser?: FirebaseUser | null;
   onSignOut?: () => void | Promise<void>;
 };
@@ -29,8 +24,6 @@ type LeftNavProps = {
 export default function LeftNav({
   open,
   onClose,
-  palette,
-  setPalette,
   closet,
   setCloset,
   saved,
@@ -38,59 +31,18 @@ export default function LeftNav({
   currentUser,
   onSignOut,
 }: LeftNavProps) {
-  const [showProfile] = useState(true);
+  // Saved Library (ALL saved items shown on /saved — favorites/accepted/etc.)
+  const [savedLibrary] = useLocalStorage<Outfit[]>("savedLibrary", []);
 
-  // ---------- Color palette helpers ----------
-  const [hex, setHex] = useState("#A3E635");
-  const valid = useMemo(
-    () => /^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(hex),
-    [hex]
-  );
+  const displayName =
+    currentUser?.displayName || currentUser?.email?.split("@")[0] || "You";
 
-  const normalizeHex = (h: string) => {
-    let v = h.trim().replace(/^#/, "");
-    if (v.length === 3) v = v.split("").map((c) => c + c).join("");
-    v = v.slice(0, 6).toUpperCase();
-    return `#${v}`;
-  };
-
-  const addHex = (h: string) => {
-    const norm = normalizeHex(h);
-    setPalette((prev) =>
-      prev.some((c) => c.toUpperCase() === norm.toUpperCase())
-        ? prev
-        : [...prev, norm]
-    );
-    setHex(norm);
-  };
-
-  const removeHex = (c: string) => {
-    setPalette((prev) => prev.filter((x) => x !== c));
-  };
-
-  const onAddClick = () => {
-    if (valid) addHex(hex);
-  };
-
-  const onHexKeyDown: React.KeyboardEventHandler<HTMLInputElement> = (e) => {
-    if ((e.key === "Enter" || e.key === " ") && valid) onAddClick();
-  };
-
-  const presets = ["#000000", "#FFFFFF", "#EAB308", "#14B8A6", "#F97316"];
-
-  // --- user helpers (avatar + name) ---
-const displayName =
-  currentUser?.displayName ||
-  currentUser?.email?.split("@")[0] ||
-  "You";
-
-const initials = displayName
-  .split(/\s+/)
-  .map((p) => p[0])
-  .slice(0, 2)
-  .join("")
-  .toUpperCase();
-
+  const initials = displayName
+    .split(/\s+/)
+    .map((p) => p[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
 
   return (
     <>
@@ -130,92 +82,44 @@ const initials = displayName
 
         {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto">
-          {/* Profile (your existing Sidebar component) */}
-          {showProfile && (
-            <div className="border-b border-zinc-200 p-3">
-              <Sidebar />
-            </div>
-          )}
-
-          {/* Sections */}
           <div className="p-3 space-y-8">
-            {/*  Color Palette */}
+            {/* ——— Primary Nav / Saved library (ALWAYS visible) ——— */}
             <section>
-              <h3 className="text-sm font-semibold text-zinc-800 mb-2">
-                Color palette
-              </h3>
-
-              {/* current palette */}
-              <div className="flex flex-wrap items-center gap-2 mb-3">
-                {palette.length === 0 && (
-                  <span className="text-xs text-zinc-500">
-                    No colors yet. Pick or type one below.
-                  </span>
-                )}
-                {palette.map((c) => (
-                  <button key={c} className="group relative" type="button" title={c}>
-                    <span
-                      className="block h-8 w-8 rounded-lg border border-zinc-200 shadow-sm"
-                      style={{ backgroundColor: c }}
-                    />
-                    <span
-                      onClick={() => removeHex(c)}
-                      className="absolute -right-1 -top-1 h-4 w-4 rounded-full bg-white/95 border border-zinc-200 p-0.5 opacity-0 group-hover:opacity-100 text-[10px] leading-3 grid place-items-center cursor-pointer hover:bg-fuchsia-100 hover:text-fuchsia-700"
-                      aria-label={`remove ${c}`}
-                    >
-                      ×
-                    </span>
-                  </button>
-                ))}
-              </div>
-
-              {/* preset swatches */}
-              <div className="flex flex-wrap items-center gap-2 mb-3">
-                {presets.map((p) => (
-                  <button
-                    key={p}
-                    type="button"
-                    title={`Add ${p}`}
-                    onClick={() => addHex(p)}
-                    className="h-7 w-7 rounded-md border border-zinc-200"
-                    style={{ backgroundColor: p }}
-                  />
-                ))}
-              </div>
-
-              {/* color + hex + add */}
-              <div className="flex items-center gap-2">
-                <input
-                  type="color"
-                  value={normalizeHex(hex)}
-                  onChange={(e) => setHex(e.target.value)}
-                  className="h-9 w-9 rounded-lg border border-zinc-200 p-0"
-                  title="Pick a color"
-                />
-                <input
-                  value={hex}
-                  onChange={(e) => setHex(e.target.value)}
-                  onKeyDown={onHexKeyDown}
-                  placeholder="#RRGGBB"
-                  aria-label="Hex color"
-                  className="w-28 rounded-md border border-zinc-200 px-2 py-1 text-sm"
-                />
-                <button
-                  disabled={!valid}
-                  onClick={onAddClick}
-                  className="h-9 w-9 rounded-lg border border-zinc-200 flex items-center justify-center hover:bg-zinc-50 disabled:opacity-50"
-                  title="Add color"
-                  type="button"
+              <NavLink
+                to="/saved"
+                className={({ isActive }) =>
+                  [
+                    "flex items-center justify-between rounded-lg px-3 py-2 border",
+                    isActive
+                      ? "bg-zinc-900 text-white border-zinc-900"
+                      : "bg-white text-zinc-800 border-zinc-200 hover:bg-zinc-50",
+                  ].join(" ")
+                }
+                onClick={onClose}
+              >
+                <span className="inline-flex items-center gap-2">
+                  <FolderOpen className="h-4 w-4" />
+                  Saved library
+                </span>
+                <span
+                  className={[
+                    "ml-2 inline-flex h-5 min-w-5 items-center justify-center rounded-full text-[10px] px-1.5",
+                    savedLibrary.length > 0
+                      ? "bg-zinc-900 text-white"
+                      : "bg-zinc-100 text-zinc-600",
+                  ].join(" ")}
                 >
-                  <Plus className="h-4 w-4" />
-                </button>
-              </div>
+                  {savedLibrary.length}
+                </span>
+              </NavLink>
             </section>
 
-            {/*  Closet */}
+            {/* ——— Closet ——— */}
             <section>
               <div className="flex items-center justify-between mb-1">
-                <h3 className="text-sm font-semibold text-zinc-800">Your closet</h3>
+                <h3 className="text-sm font-semibold text-zinc-800">
+                  Your closet
+                </h3>
                 {closet.length > 0 && (
                   <button
                     className="text-xs text-zinc-500 hover:text-fuchsia-600 transition"
@@ -267,14 +171,18 @@ const initials = displayName
               </div>
             </section>
 
-            {/*  Saved */}
+            {/* ——— Sidebar “Saved outfits” (EXPLICIT saves only) ——— */}
             <section>
               <div className="mb-2 flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-zinc-800">Saved outfits</h3>
+                <h3 className="text-sm font-semibold text-zinc-800">
+                  Saved outfits
+                </h3>
+                {/* Show "View all" when there are explicit saves */}
                 {saved.length > 0 && (
                   <Link
                     to="/saved"
                     className="text-xs text-zinc-600 hover:text-zinc-900 underline underline-offset-4"
+                    onClick={onClose}
                   >
                     View all →
                   </Link>
@@ -282,7 +190,18 @@ const initials = displayName
               </div>
 
               {saved.length === 0 ? (
-                <div className="text-xs text-zinc-500">No saved outfits yet.</div>
+                <div className="text-xs text-zinc-500 rounded-lg border border-dashed border-zinc-200 p-3">
+                  Nothing saved from this session.
+                  <div className="mt-1">
+                    <Link
+                      to="/saved"
+                      onClick={onClose}
+                      className="text-zinc-700 underline underline-offset-2 hover:text-zinc-900"
+                    >
+                      Open Saved library →
+                    </Link>
+                  </div>
+                </div>
               ) : (
                 <div className="space-y-2">
                   {saved.map((o) => {
@@ -315,6 +234,7 @@ const initials = displayName
                                   to={`/saved?cat=${slugify(c)}&focus=${o.id}`}
                                   className="text-[11px] px-2 py-0.5 rounded-full border border-zinc-200 text-zinc-700 hover:bg-zinc-50"
                                   title={`View ${c}`}
+                                  onClick={onClose}
                                 >
                                   {c}
                                 </Link>
@@ -323,6 +243,7 @@ const initials = displayName
                                 to={`/saved?focus=${o.id}`}
                                 className="text-[11px] ml-1 underline underline-offset-2 text-zinc-600 hover:text-zinc-900"
                                 title="Open in saved"
+                                onClick={onClose}
                               >
                                 Open
                               </Link>
@@ -347,39 +268,38 @@ const initials = displayName
           </div>
         </div>
 
-{/* ─── Sticky footer: current user + Sign out ─── */}
-{currentUser && (
-  <div className="border-t border-zinc-200 p-3 bg-white">
-    <div className="flex items-center gap-2">
-      <div className="h-8 w-8 rounded-full bg-zinc-200 grid place-items-center text-xs font-semibold text-zinc-800">
-        {initials}
-      </div>
+        {/* Footer: user + sign out */}
+        {currentUser && (
+          <div className="border-t border-zinc-200 p-3 bg-white">
+            <div className="flex items-center gap-2">
+              <div className="h-8 w-8 rounded-full bg-zinc-200 grid place-items-center text-xs font-semibold text-zinc-800">
+                {initials}
+              </div>
 
-      <div className="flex-1 min-w-0">
-        <div className="truncate text-sm font-medium text-zinc-800">
-          {displayName}
-        </div>
-        {currentUser.email && (
-          <div className="truncate text-[11px] text-zinc-500">
-            {currentUser.email}
+              <div className="flex-1 min-w-0">
+                <div className="truncate text-sm font-medium text-zinc-800">
+                  {displayName}
+                </div>
+                {currentUser.email && (
+                  <div className="truncate text-[11px] text-zinc-500">
+                    {currentUser.email}
+                  </div>
+                )}
+              </div>
+
+              {onSignOut && (
+                <button
+                  onClick={onSignOut}
+                  className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs hover:bg-zinc-50"
+                  title="Sign out"
+                >
+                  <LogOut className="h-3.5 w-3.5" />
+                  Sign out
+                </button>
+              )}
+            </div>
           </div>
         )}
-      </div>
-
-      {onSignOut && (
-        <button
-          onClick={onSignOut}
-          className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs hover:bg-zinc-50"
-          title="Sign out"
-        >
-          <LogOut className="h-3.5 w-3.5" />
-          Sign out
-        </button>
-      )}
-    </div>
-  </div>
-)}
-
       </aside>
     </>
   );
