@@ -1,34 +1,51 @@
 // src/api/suggest.ts
 import type { Outfit, SuggestFilters } from "@/types";
 
-// Use env var in dev/prod; falls back to localhost
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8787";
+/**
+ * Choose the base URL:
+ * - Default: same-origin (works on Vercel when your serverless functions live under /api/*)
+ * - If you set VITE_API_BASE, we use that (e.g. for local custom servers or Netlify)
+ */
+function getApiBase(): string {
+  const forced = (import.meta.env.VITE_API_BASE || "").trim();
+  if (forced) return forced.replace(/\/$/, ""); // strip trailing slash
+  return ""; // same-origin
+}
+
+const API_BASE = getApiBase();
+
+function joinUrl(path: string): string {
+  const p = path.startsWith("/") ? path : `/${path}`;
+  return `${API_BASE}${p}`;
+}
 
 async function postJSON<T>(path: string, body: unknown): Promise<T> {
   const ctrl = new AbortController();
-  const id = setTimeout(() => ctrl.abort(), 60000); // 60s timeout
+  const id = setTimeout(() => ctrl.abort(), 60_000); // 60s timeout
 
   try {
-    const url = `${API_BASE}${path}`;
-    // Optional: logs while debugging
-    // console.log("[POST]", url, body);
+    const url = joinUrl(path);
 
     const rsp = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
       signal: ctrl.signal,
+      credentials: "same-origin",
     });
 
     const raw = await rsp.text();
     clearTimeout(id);
 
-    // console.log("[RESP]", rsp.status, rsp.statusText, raw);
-
     if (!rsp.ok) {
       throw new Error(`API ${path} failed: ${rsp.status} ${rsp.statusText} ${raw}`);
     }
-    return JSON.parse(raw) as T;
+
+    try {
+      return JSON.parse(raw) as T;
+    } catch {
+      throw new Error(`Invalid JSON from ${path}`);
+    }
   } catch (e: any) {
     clearTimeout(id);
     if (e?.name === "AbortError") {
@@ -61,15 +78,24 @@ export async function suggestWithGeminiPhoto(
   form.append("occasion", filters.occasion);
   form.append("palette", JSON.stringify(filters.palette || []));
 
-  const rsp = await fetch(`${API_BASE}/api/gemini/suggest-from-photo`, {
+  const url = joinUrl("/api/gemini/suggest-from-photo");
+
+  const rsp = await fetch(url, {
     method: "POST",
     body: form,
+    credentials: "same-origin",
   });
 
   const raw = await rsp.text();
   if (!rsp.ok) {
-    throw new Error(`API /api/gemini/suggest-from-photo failed: ${rsp.status} ${rsp.statusText} ${raw}`);
+    throw new Error(
+      `API /api/gemini/suggest-from-photo failed: ${rsp.status} ${rsp.statusText} ${raw}`
+    );
   }
-  const data = JSON.parse(raw);
-  return data.outfits ?? [];
+  try {
+    const data = JSON.parse(raw);
+    return data.outfits ?? [];
+  } catch {
+    throw new Error("Invalid JSON from /api/gemini/suggest-from-photo");
+  }
 }
