@@ -1,5 +1,3 @@
-// src/types.ts
-
 export type BuyLink = {
   label: string;
   url: string;
@@ -62,7 +60,7 @@ export type Outfit = {
 // shared between StylistPage, SuggestControls, API filters
 export type SourceMode = "shop_anywhere" | "prefer_closet" | "closet_only";
 
-// match how you use Profile in StylistPage
+// profile info
 export type Profile = {
   gender?: string;
   heightCm?: number;
@@ -90,7 +88,7 @@ export type SuggestFilters = {
     playfulPro: number;
   };
 
-
+  // Add-ons control
   requiredAddOns?: AddOn[];
   forceCompleteLook?: boolean;
 };

@@ -1,4 +1,3 @@
-// src/PersonalStylistUI/StylistPage.tsx
 import { useEffect, useMemo, useState } from "react";
 import TopBar from "./TopBar";
 import SuggestControls from "./SuggestControls";
@@ -6,7 +5,7 @@ import UploadArea from "./UploadArea";
 import OutfitCard from "./OutfitCard";
 import LeftNav from "./LeftNav";
 import ControlsBar from "./ControlsBar";
-import AddOnsPicker from "./AddOnsPicker"; 
+import AddOnsPicker from "./AddOnsPicker";
 import type { Outfit, ClosetItem, Profile, SourceMode, AddOn } from "@/types";
 import { useLocalStorage } from "@/hooks/useLocalStorage";
 import { suggestWithGemini } from "@/api/suggest";
@@ -22,6 +21,21 @@ type Controls = { casualFormal: number; playfulPro: number };
 // localStorage keys scoped per user
 const doneKey = (uid?: string) => (uid ? `onboarding_done_${uid}` : "");
 const dataKey = (uid?: string) => (uid ? `onboarding_data_${uid}` : "");
+
+// Treat these as “accessory/add-on” categories we want to hide unless requested
+const ADD_ON_CATEGORIES = new Set([
+  "footwear",
+  "heels",
+  "bag",
+  "jewelry",
+  "belt",
+  "watch",
+  "eyewear",
+  "headwear",
+  "socks",
+  "scarf",
+  "outerwear",
+]);
 
 // 🔍 Infer gender directly from the user prompt text
 function inferGenderFromPrompt(text: string | undefined): Profile["gender"] | undefined {
@@ -95,12 +109,12 @@ export default function StylistPage() {
   const showToast = (msg: string) => {
     setToast({ msg, visible: true });
     window.clearTimeout((showToast as any)._t);
-    (showToast as any)._t = window.setTimeout(() => setToast({ msg: "", visible: false }), 1800);
+    (showToast as any)._t = window.setTimeout(() => setToast({ msg, visible: false }), 1800);
   };
 
-  // Add-ons (extras like shoes, bags, jewelry)
-  const [requiredAddOns, setRequiredAddOns] = useLocalStorage<AddOn[]>("addons", ["footwear"]);
-  const [forceCompleteLook, setForceCompleteLook] = useLocalStorage<boolean>("forceComplete", true);
+  // ✅ IMPORTANT: defaults changed so NO add-ons unless user selects
+  const [requiredAddOns, setRequiredAddOns] = useLocalStorage<AddOn[]>("addons", []);
+  const [forceCompleteLook, setForceCompleteLook] = useLocalStorage<boolean>("forceComplete", false);
 
   // Closet helpers
   const closetImages = useMemo(
@@ -145,41 +159,43 @@ export default function StylistPage() {
           ].join(" ");
 
     const genderRule = (() => {
-      if (!effectiveGender) return "Pick accessories that align with the wearer’s style and formality.";
+      if (!effectiveGender) return null;
       const g = String(effectiveGender).toLowerCase();
-
       if (g.includes("male") || g === "man" || g === "men") {
         return [
           "The wearer is MALE. Suggest menswear silhouettes only.",
-          "Footwear examples: clean sneakers, loafers, derbies, chelseas, oxfords depending on formality.",
-          "Accessories: belts, watches, minimal jewelry, bags. Do NOT mix genders in one suggestion.",
+          "Do NOT mix genders in one suggestion.",
         ].join(" ");
       }
       if (g.includes("female") || g === "woman" || g === "women") {
         return [
           "The wearer is FEMALE. Suggest womenswear silhouettes only.",
-          "Footwear examples: flats, heels, boots, dress sandals depending on formality.",
-          "Accessories: jewelry, belts, bags, hair accessories. Do NOT mix genders in one suggestion.",
+          "Do NOT mix genders in one suggestion.",
         ].join(" ");
       }
       return `Respect the user's stated gender identity: ${effectiveGender}.`;
     })();
 
-    const addOnRule = [
-      forceCompleteLook
-        ? "Always deliver a COMPLETE LOOK: include footwear plus 1–2 tasteful accessories."
-        : null,
-      requiredAddOns.length
-        ? `The following add-ons are REQUIRED to be present in the final outfit: ${requiredAddOns.join(
-            ", "
-          )}.`
-        : null,
-      "Prefer one cohesive accessory story (metal tones, leather colors) instead of many small pieces.",
-      "Return each outfit with an 'items' array (category, name, notes) and optionally 'missing' [].",
-      "Categories can include: top, bottom, dress, outerwear, footwear, heels, bag, jewelry, belt, watch, eyewear, headwear, socks, scarf.",
-    ]
-      .filter(Boolean)
-      .join(" ");
+    const noAddOnsRequested = !forceCompleteLook && requiredAddOns.length === 0;
+
+    const addOnRule = noAddOnsRequested
+      ? // ⛔️ Explicitly forbid accessories when none selected
+        "Do NOT add accessories (shoes, footwear, heels, bags, jewelry, belts, watches, eyewear, headwear, scarves, socks, outerwear) unless explicitly requested."
+      : [
+          forceCompleteLook
+            ? "Always deliver a COMPLETE LOOK: include footwear plus 1–2 tasteful accessories."
+            : null,
+          requiredAddOns.length
+            ? `The following add-ons are REQUIRED to be present in the final outfit: ${requiredAddOns.join(
+                ", "
+              )}.`
+            : null,
+          "Prefer one cohesive accessory story (metal tones, leather colors) instead of many small pieces.",
+          "Return each outfit with an 'items' array (category, name, notes) and optionally 'missing' [].",
+          "Categories can include: top, bottom, dress, outerwear, footwear, heels, bag, jewelry, belt, watch, eyewear, headwear, socks, scarf.",
+        ]
+          .filter(Boolean)
+          .join(" ");
 
     return [
       `You are a stylist. Prioritize body type fit & proportions.`,
@@ -232,14 +248,13 @@ export default function StylistPage() {
 
         const wantLinks = source !== "closet_only";
 
-        // Build search query (gender-scoped if known)
+        // Build shopping search query (gender-scoped if known)
         const queryParts = [o.title?.trim(), ...(o.tags ?? []), prompt?.trim()].filter(Boolean);
         let genderTerm = "";
-        if (effectiveGender) {
-          const g = effectiveGender.toLowerCase();
-          if (g.includes("male") || g === "man" || g === "men") genderTerm = "men";
-          else if (g.includes("female") || g === "woman" || g === "women") genderTerm = "women";
-        }
+        const gEff = effectiveGender?.toLowerCase();
+        if (gEff?.includes("male") || gEff === "man" || gEff === "men") genderTerm = "men";
+        else if (gEff?.includes("female") || gEff === "woman" || gEff === "women") genderTerm = "women";
+
         const searchQuery =
           [genderTerm, ...queryParts].filter(Boolean).join(" ").trim() ||
           (genderTerm ? `${genderTerm} versatile everyday outfit ideas` : "versatile everyday outfit ideas");
@@ -270,24 +285,29 @@ export default function StylistPage() {
           return true;
         });
 
-        // Per-item accessory links (if model returned items without links)
-        const items = Array.isArray(o.items)
-          ? o.items.map((it) => {
-              if (!wantLinks || (it.buyLink && it.buyLink.url)) return it;
-              const parts = [it.name, it.category, prompt?.trim()].filter(Boolean);
-              const q =
-                parts.join(" ").trim() ||
-                `${it.category} ${genderTerm ? genderTerm : ""}`.trim();
-              return {
-                ...it,
-                buyLink: {
-                  label: "See similar",
-                  url: `https://www.google.com/search?q=${encodeURIComponent(q)}&tbm=shop`,
-                  retailer: "Google Shopping",
-                },
-              };
-            })
-          : o.items;
+        // If NO add-ons were requested, strip accessory items that the model added anyway
+        const noAddOnsRequested = !forceCompleteLook && requiredAddOns.length === 0;
+        let items = o.items;
+        if (noAddOnsRequested && Array.isArray(items)) {
+          items = items.filter((it) => !ADD_ON_CATEGORIES.has((it.category || "").toLowerCase()));
+        }
+
+        // If add-ons WERE requested, ensure per-item accessory links exist
+        if (!noAddOnsRequested && Array.isArray(items) && wantLinks) {
+          items = items.map((it) => {
+            if (it.buyLink?.url) return it;
+            const parts = [it.name, it.category, prompt?.trim()].filter(Boolean);
+            const q = parts.join(" ").trim() || `${it.category} ${genderTerm}`.trim();
+            return {
+              ...it,
+              buyLink: {
+                label: "See similar",
+                url: `https://www.google.com/search?q=${encodeURIComponent(q)}&tbm=shop`,
+                retailer: "Google Shopping",
+              },
+            };
+          });
+        }
 
         return { ...o, imageUrls: urls, buyLinks, items };
       });
@@ -523,7 +543,7 @@ export default function StylistPage() {
 
             <ControlsBar value={controls} onChange={setControls} onRandomize={handleSurprise} />
 
-            {/* NEW: Add-ons picker */}
+            {/* Add-ons picker */}
             <AddOnsPicker
               value={requiredAddOns}
               onChange={setRequiredAddOns}
@@ -575,7 +595,9 @@ export default function StylistPage() {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
                 {outfits.length === 0 ? (
-                  <div className="col-span-full text-xs text-zinc-500">No outfits yet — try generating above.</div>
+                  <div className="col-span-full text-xs text-zinc-500">
+                    No outfits yet — try generating above.
+                  </div>
                 ) : (
                   outfits.map((o) => (
                     <div key={o.id}>
@@ -593,7 +615,9 @@ export default function StylistPage() {
             </section>
           </main>
 
-          <footer className="text-center text-xs text-zinc-500 pb-8">HCI · Your Personal Stylist</footer>
+          <footer className="text-center text-xs text-zinc-500 pb-8">
+            HCI · Your Personal Stylist
+          </footer>
         </div>
       </div>
 

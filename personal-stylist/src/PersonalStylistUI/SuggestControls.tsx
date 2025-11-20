@@ -35,7 +35,7 @@ export default function SuggestControls({
           id={inputId}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
-          placeholder='e.g., "going for a party, suggest some outfits"'
+          placeholder='e.g., "Going to a party—suggest some outfits"'
           className="w-full rounded-md border border-zinc-200 px-3 py-2 text-sm outline-none focus:border-zinc-400"
         />
         <button
@@ -71,11 +71,7 @@ export default function SuggestControls({
         </div>
       </div>
 
-      {errorMsg && (
-        <div className="mt-2 text-sm text-red-600">
-          {errorMsg}
-        </div>
-      )}
+      {errorMsg && <div className="mt-2 text-sm text-red-600">{errorMsg}</div>}
     </div>
   );
 }
