@@ -6,7 +6,8 @@ import UploadArea from "./UploadArea";
 import OutfitCard from "./OutfitCard";
 import LeftNav from "./LeftNav";
 import ControlsBar from "./ControlsBar";
-import type { Outfit, ClosetItem, Profile, SourceMode } from "@/types";
+import AddOnsPicker from "./AddOnsPicker"; 
+import type { Outfit, ClosetItem, Profile, SourceMode, AddOn } from "@/types";
 import { useLocalStorage } from "@/hooks/useLocalStorage";
 import { suggestWithGemini } from "@/api/suggest";
 import { Menu, Loader2, LogIn } from "lucide-react";
@@ -57,14 +58,18 @@ export default function StylistPage() {
 
   // Palette still used for onboarding + prompt context (no visible UI here)
   const [palette, setPalette] = useLocalStorage<string[]>("palette", [
-    "#E3E1FF", "#D0F4DE", "#FEE7AE", "#FFC2C7", "#B9E3FF",
+    "#E3E1FF",
+    "#D0F4DE",
+    "#FEE7AE",
+    "#FFC2C7",
+    "#B9E3FF",
   ]);
 
-  // ⬇️ Two separate stores:
-  // 1) savedOutfits → feeds LeftNav sidebar (only when user clicks explicit Save)
-  // 2) savedLibrary → feeds Saved page (favorites/accepts AND saves)
+  // Two separate stores:
+  // - savedOutfits → LeftNav sidebar (only explicit Save)
+  // - savedLibrary → Saved page (favorites/accepts AND saves)
   const [saved, setSaved] = useLocalStorage<Outfit[]>("savedOutfits", []);
-  const [, setLibrary] = useLocalStorage<Outfit[]>("savedLibrary", []); // ← skip unused first item
+  const [, setLibrary] = useLocalStorage<Outfit[]>("savedLibrary", []);
 
   const [closet, setCloset] = useLocalStorage<ClosetItem[]>("closet", []);
 
@@ -93,6 +98,10 @@ export default function StylistPage() {
     (showToast as any)._t = window.setTimeout(() => setToast({ msg: "", visible: false }), 1800);
   };
 
+  // Add-ons (extras like shoes, bags, jewelry)
+  const [requiredAddOns, setRequiredAddOns] = useLocalStorage<AddOn[]>("addons", ["footwear"]);
+  const [forceCompleteLook, setForceCompleteLook] = useLocalStorage<boolean>("forceComplete", true);
+
   // Closet helpers
   const closetImages = useMemo(
     () => closet.filter((i) => i.image).map((i) => i.image!) as string[],
@@ -110,7 +119,6 @@ export default function StylistPage() {
 
   function profileToText(p: Profile) {
     const bits: string[] = [];
-    // intentionally NOT using p.gender anymore (gender comes from prompt)
     if (p.heightCm) bits.push(`height: ${p.heightCm}cm`);
     if (p.bodyType) bits.push(`body type: ${p.bodyType}`);
     if (p.notes?.trim()) bits.push(`notes: ${p.notes.trim()}`);
@@ -120,49 +128,58 @@ export default function StylistPage() {
   function buildPrompt() {
     const profileTxt = profileToText(profile);
     const paletteTxt = palette.length ? palette.join(", ") : "no preference";
-    const userPrompt =
-      prompt?.trim() || "No extra style prompt provided. Suggest versatile looks.";
+    const userPrompt = prompt?.trim() || "No extra style prompt provided. Suggest versatile looks.";
 
-    // 🔒 Strong, mode-specific source policy
     const sourceLine =
       source === "shop_anywhere"
         ? "Source policy: You may mix the user's closet items with new shopping suggestions."
         : source === "prefer_closet"
         ? [
             "Source policy: Prefer the user's closet items; only add new shopping items if necessary to complete the look.",
-            "When you add a new item, explain why it's needed (e.g., 'Missing a layer: …')."
+            "When you add a new item, explain why it's needed (e.g., 'Missing a layer: …').",
           ].join(" ")
         : [
             "Source policy: CLOSET ONLY. Use only items that could plausibly exist in the closet described by closetSummary/closetImages.",
-            "If something is missing, do NOT recommend external products. Instead respond with a clear 'Missing:' note (e.g., 'Missing: black belt').",
-            "Do NOT include shopping links."
+            "If something is missing, do NOT recommend external products. Instead respond with a clear 'Missing:' note.",
+            "Do NOT include shopping links.",
           ].join(" ");
 
-    // 🧭 Gender guardrails from the prompt
     const genderRule = (() => {
-      if (!effectiveGender) return null;
+      if (!effectiveGender) return "Pick accessories that align with the wearer’s style and formality.";
       const g = String(effectiveGender).toLowerCase();
 
       if (g.includes("male") || g === "man" || g === "men") {
         return [
-          "The wearer is MALE.",
-          "You MUST ONLY suggest menswear silhouettes and items (men's shirts, men's trousers, men's coats, etc.).",
-          "Do NOT suggest womenswear (dresses, skirts, heels, women's blouses) unless explicitly asked.",
-          "Do NOT mix genders in a single suggestion."
+          "The wearer is MALE. Suggest menswear silhouettes only.",
+          "Footwear examples: clean sneakers, loafers, derbies, chelseas, oxfords depending on formality.",
+          "Accessories: belts, watches, minimal jewelry, bags. Do NOT mix genders in one suggestion.",
         ].join(" ");
       }
-
       if (g.includes("female") || g === "woman" || g === "women") {
         return [
-          "The wearer is FEMALE.",
-          "You MUST ONLY suggest womenswear silhouettes and items (women's tops, dresses, skirts, women's trousers, etc.).",
-          "Do NOT suggest menswear unless explicitly asked.",
-          "Do NOT mix genders in a single suggestion."
+          "The wearer is FEMALE. Suggest womenswear silhouettes only.",
+          "Footwear examples: flats, heels, boots, dress sandals depending on formality.",
+          "Accessories: jewelry, belts, bags, hair accessories. Do NOT mix genders in one suggestion.",
         ].join(" ");
       }
-
-      return `Outfits must respect the user's stated gender identity: ${effectiveGender}. Avoid mixing outfits for different genders unless explicitly requested.`;
+      return `Respect the user's stated gender identity: ${effectiveGender}.`;
     })();
+
+    const addOnRule = [
+      forceCompleteLook
+        ? "Always deliver a COMPLETE LOOK: include footwear plus 1–2 tasteful accessories."
+        : null,
+      requiredAddOns.length
+        ? `The following add-ons are REQUIRED to be present in the final outfit: ${requiredAddOns.join(
+            ", "
+          )}.`
+        : null,
+      "Prefer one cohesive accessory story (metal tones, leather colors) instead of many small pieces.",
+      "Return each outfit with an 'items' array (category, name, notes) and optionally 'missing' [].",
+      "Categories can include: top, bottom, dress, outerwear, footwear, heels, bag, jewelry, belt, watch, eyewear, headwear, socks, scarf.",
+    ]
+      .filter(Boolean)
+      .join(" ");
 
     return [
       `You are a stylist. Prioritize body type fit & proportions.`,
@@ -172,7 +189,8 @@ export default function StylistPage() {
       `Palette preference: ${paletteTxt}.`,
       `Closet summary: ${closetSummary}.`,
       sourceLine,
-      `Return outfits that flatter the specified body type. If guidance conflicts, favor body-type-friendly choices (silhouette, rise, lengths, cuts).`,
+      addOnRule,
+      `Return outfits that flatter the specified body type.`,
     ]
       .filter(Boolean)
       .join("\n");
@@ -183,7 +201,6 @@ export default function StylistPage() {
       setLoading(true);
       setErrorMsg(null);
 
-      // Guard: closet requested but empty
       if ((source === "prefer_closet" || source === "closet_only") && closet.length === 0) {
         setErrorMsg("No items in your closet. Add items to your closet or switch source.");
         return;
@@ -198,24 +215,24 @@ export default function StylistPage() {
         closetSummary,
         closetImages,
         userPrompt: prompt,
+        requiredAddOns,
+        forceCompleteLook,
       };
 
       const data = await suggestWithGemini(filters);
       const base = data.length ? data : demoOutfits();
 
-      // ------ Hydration with robust fallback buy links ------
+      // ------ Hydration with robust links (merge model + fallbacks) ------
       const hydrated: Outfit[] = base.map((o) => {
-        // Images: show closet pieces in non-shop-anywhere modes
         const urls = o.imageUrls?.length
           ? o.imageUrls
           : source !== "shop_anywhere"
           ? closetImages.slice(0, 9)
           : [];
 
-        // Links policy
         const wantLinks = source !== "closet_only";
 
-        // Build shopping search query (scoped by gender term if known)
+        // Build search query (gender-scoped if known)
         const queryParts = [o.title?.trim(), ...(o.tags ?? []), prompt?.trim()].filter(Boolean);
         let genderTerm = "";
         if (effectiveGender) {
@@ -238,15 +255,43 @@ export default function StylistPage() {
           retailer: "ASOS",
         };
 
-        const rawLinks = Array.isArray(o.buyLinks)
-          ? o.buyLinks.filter((l) => l && typeof l.url === "string" && l.url.startsWith("http"))
+        // Validate model links and MERGE with fallbacks, then de-dupe by URL
+        const modelLinks = Array.isArray(o.buyLinks)
+          ? o.buyLinks.filter((l) => l && typeof l.url === "string" && /^https?:\/\//i.test(l.url))
           : [];
 
-        const buyLinks = wantLinks ? (rawLinks.length ? rawLinks : [googleShop, asosSearch]) : [];
+        const merged = wantLinks ? [...modelLinks, googleShop, asosSearch] : [];
+        const seen = new Set<string>();
+        const buyLinks = merged.filter((l) => {
+          if (!l?.url) return false;
+          const key = l.url;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
 
-        return { ...o, imageUrls: urls, buyLinks };
+        // Per-item accessory links (if model returned items without links)
+        const items = Array.isArray(o.items)
+          ? o.items.map((it) => {
+              if (!wantLinks || (it.buyLink && it.buyLink.url)) return it;
+              const parts = [it.name, it.category, prompt?.trim()].filter(Boolean);
+              const q =
+                parts.join(" ").trim() ||
+                `${it.category} ${genderTerm ? genderTerm : ""}`.trim();
+              return {
+                ...it,
+                buyLink: {
+                  label: "See similar",
+                  url: `https://www.google.com/search?q=${encodeURIComponent(q)}&tbm=shop`,
+                  retailer: "Google Shopping",
+                },
+              };
+            })
+          : o.items;
+
+        return { ...o, imageUrls: urls, buyLinks, items };
       });
-      // ------------------------------------------------------
+      // -------------------------------------------------------------------
 
       setOutfits(hydrated);
     } catch {
@@ -258,24 +303,25 @@ export default function StylistPage() {
 
   // ---------- Saved list (sidebar) : UPSERT helper ----------
   function upsertSaved(update: Outfit) {
-    setSaved(prev => {
-      const idx = prev.findIndex(p => p.id === update.id);
-      const merged: Outfit = idx === -1
-        ? update
-        : {
-            ...prev[idx],
-            ...update,
-            savedMeta: {
-              ...prev[idx].savedMeta,
-              ...update.savedMeta,
-              categories: Array.from(
-                new Set([
-                  ...(prev[idx].savedMeta?.categories ?? []),
-                  ...(update.savedMeta?.categories ?? []),
-                ])
-              ),
-            },
-          };
+    setSaved((prev) => {
+      const idx = prev.findIndex((p) => p.id === update.id);
+      const merged: Outfit =
+        idx === -1
+          ? update
+          : {
+              ...prev[idx],
+              ...update,
+              savedMeta: {
+                ...prev[idx].savedMeta,
+                ...update.savedMeta,
+                categories: Array.from(
+                  new Set([
+                    ...(prev[idx].savedMeta?.categories ?? []),
+                    ...(update.savedMeta?.categories ?? []),
+                  ])
+                ),
+              },
+            };
       if (idx === -1) return [merged, ...prev];
       const next = [...prev];
       next[idx] = merged;
@@ -285,24 +331,25 @@ export default function StylistPage() {
 
   // ---------- Library (Saved page) : UPSERT helper ----------
   function upsertLibrary(update: Outfit) {
-    setLibrary(prev => {
-      const idx = prev.findIndex(p => p.id === update.id);
-      const merged: Outfit = idx === -1
-        ? update
-        : {
-            ...prev[idx],
-            ...update,
-            savedMeta: {
-              ...prev[idx].savedMeta,
-              ...update.savedMeta,
-              categories: Array.from(
-                new Set([
-                  ...(prev[idx].savedMeta?.categories ?? []),
-                  ...(update.savedMeta?.categories ?? []),
-                ])
-              ),
-            },
-          };
+    setLibrary((prev) => {
+      const idx = prev.findIndex((p) => p.id === update.id);
+      const merged: Outfit =
+        idx === -1
+          ? update
+          : {
+              ...prev[idx],
+              ...update,
+              savedMeta: {
+                ...prev[idx].savedMeta,
+                ...update.savedMeta,
+                categories: Array.from(
+                  new Set([
+                    ...(prev[idx].savedMeta?.categories ?? []),
+                    ...(update.savedMeta?.categories ?? []),
+                  ])
+                ),
+              },
+            };
       if (idx === -1) return [merged, ...prev];
       const next = [...prev];
       next[idx] = merged;
@@ -310,15 +357,9 @@ export default function StylistPage() {
     });
   }
 
-  // ⭐ Favorite toggle — updates suggestions + LIBRARY ONLY
   function handleToggleFavorite(id: string) {
-    // Update in suggestions list
-    setOutfits(prev =>
-      prev.map(o => (o.id === id ? { ...o, isFavorite: !o.isFavorite } : o))
-    );
-
-    // Upsert into library (Saved page), NOT sidebar
-    const curr = outfits.find(o => o.id === id);
+    setOutfits((prev) => prev.map((o) => (o.id === id ? { ...o, isFavorite: !o.isFavorite } : o)));
+    const curr = outfits.find((o) => o.id === id);
     if (curr) {
       const nextFav = !curr.isFavorite;
       const categories = curr.tags ?? [];
@@ -334,7 +375,6 @@ export default function StylistPage() {
     }
   }
 
-  // 💾 Explicit Save button — pins to sidebar AND library
   function handleSave(oo: Outfit) {
     const categories = oo.tags ?? [];
     const enriched: Outfit = {
@@ -344,18 +384,14 @@ export default function StylistPage() {
         categories: Array.from(new Set([...(oo.savedMeta?.categories ?? []), ...categories])),
       },
     };
-    upsertSaved(enriched);   // sidebar
-    upsertLibrary(enriched); // saved page
+    upsertSaved(enriched);
+    upsertLibrary(enriched);
     showToast("Saved — added to sidebar and Saved page");
   }
 
-  // ✅/❌ Verdict — updates suggestions + LIBRARY ONLY
   function handleVerdict(id: string, verdict: "accepted" | "rejected") {
-    // mark in suggestions
-    setOutfits(prev => prev.map(o => (o.id === id ? { ...o, verdict } : o)));
-
-    // upsert in library (Saved page), not sidebar
-    const curr = outfits.find(o => o.id === id);
+    setOutfits((prev) => prev.map((o) => (o.id === id ? { ...o, verdict } : o)));
+    const curr = outfits.find((o) => o.id === id);
     if (curr) {
       const categories = curr.tags ?? [];
       upsertLibrary({
@@ -383,9 +419,7 @@ export default function StylistPage() {
   if (authLoading) {
     return (
       <div className="min-h-screen grid place-items-center text-zinc-700">
-        <div className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
-          Checking your session…
-        </div>
+        <div className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">Checking your session…</div>
       </div>
     );
   }
@@ -395,9 +429,7 @@ export default function StylistPage() {
       <div className="min-h-screen grid place-items-center bg-white px-4">
         <div className="w-full max-w-sm rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm text-center">
           <h1 className="text-lg font-semibold">Welcome to StyleAI</h1>
-          <p className="mt-2 text-sm text-zinc-600">
-            Sign in to save your closet, profile, and outfits.
-          </p>
+          <p className="mt-2 text-sm text-zinc-600">Sign in to save your closet, profile, and outfits.</p>
           <button
             onClick={signInWithGoogle}
             className="mt-4 inline-flex items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2 text-sm text-white hover:bg-zinc-800"
@@ -405,9 +437,7 @@ export default function StylistPage() {
             <LogIn className="h-4 w-4" />
             Continue with Google
           </button>
-          <p className="mt-3 text-[11px] text-zinc-500">
-            By continuing, you agree to our Terms and Privacy Policy.
-          </p>
+          <p className="mt-3 text-[11px] text-zinc-500">By continuing, you agree to our Terms and Privacy Policy.</p>
         </div>
       </div>
     );
@@ -452,7 +482,7 @@ export default function StylistPage() {
         }}
       />
 
-      {/* Left Nav (sidebar shows ONLY explicit saves via `savedOutfits`) */}
+      {/* Left Nav */}
       <LeftNav
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
@@ -463,7 +493,6 @@ export default function StylistPage() {
         currentUser={user}
         onSignOut={async () => {
           await signOut();
-          // window.location.assign("/");
         }}
       />
 
@@ -482,7 +511,6 @@ export default function StylistPage() {
         {/* Centered main content */}
         <div className="mx-auto w-full max-w-6xl px-4 sm:px-6">
           <main className="py-6 space-y-6">
-            {/* Controls: prompt + source mode only */}
             <SuggestControls
               prompt={prompt}
               setPrompt={setPrompt}
@@ -494,6 +522,14 @@ export default function StylistPage() {
             />
 
             <ControlsBar value={controls} onChange={setControls} onRandomize={handleSurprise} />
+
+            {/* NEW: Add-ons picker */}
+            <AddOnsPicker
+              value={requiredAddOns}
+              onChange={setRequiredAddOns}
+              forceCompleteLook={forceCompleteLook}
+              onToggleForce={setForceCompleteLook}
+            />
 
             <div className="rounded-2xl border border-zinc-200 bg-white p-4 sm:p-5">
               <UploadArea
@@ -509,7 +545,6 @@ export default function StylistPage() {
               />
             </div>
 
-            {/* Closet warning when source requires closet */}
             {(source === "prefer_closet" || source === "closet_only") && closet.length === 0 && (
               <div className="rounded-lg border border-amber-300 bg-amber-50 text-amber-900 px-3 py-2 text-sm">
                 No items in your closet. Add items to your closet or switch source to “Shop anywhere”.
@@ -540,9 +575,7 @@ export default function StylistPage() {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
                 {outfits.length === 0 ? (
-                  <div className="col-span-full text-xs text-zinc-500">
-                    No outfits yet — try generating above.
-                  </div>
+                  <div className="col-span-full text-xs text-zinc-500">No outfits yet — try generating above.</div>
                 ) : (
                   outfits.map((o) => (
                     <div key={o.id}>
@@ -551,7 +584,7 @@ export default function StylistPage() {
                         onSave={handleSave}
                         onToggleFavorite={handleToggleFavorite}
                         onVerdict={(v) => v && handleVerdict(o.id, v)}
-                        showBuyLinks={source !== "closet_only"} // hide links in closet-only mode
+                        showBuyLinks={source !== "closet_only"}
                       />
                     </div>
                   ))
@@ -560,21 +593,14 @@ export default function StylistPage() {
             </section>
           </main>
 
-          <footer className="text-center text-xs text-zinc-500 pb-8">
-            HCI · Your Personal Stylist
-          </footer>
+          <footer className="text-center text-xs text-zinc-500 pb-8">HCI · Your Personal Stylist</footer>
         </div>
       </div>
 
       {/*  Onboarding modal */}
       {user && showOnboarding && (
         <Onboarding
-          defaultValues={{
-            styles: [],
-            occasions: [],
-            seasons: [],
-            colors: palette,
-          }}
+          defaultValues={{ styles: [], occasions: [], seasons: [], colors: palette }}
           onSkip={() => {
             localStorage.setItem(doneKey(user.uid), "1");
             setShowOnboarding(false);

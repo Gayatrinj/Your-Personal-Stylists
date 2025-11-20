@@ -7,6 +7,29 @@ export type BuyLink = {
   retailer?: string;
 };
 
+/** Optional, structured item list (lets us show/accessorize a look) */
+export type OutfitItem = {
+  category: string; // e.g. "footwear", "bag", "jewelry", "outerwear"
+  name?: string;    // e.g. "white leather sneakers"
+  notes?: string;   // e.g. "minimal, low profile sole"
+  imageUrl?: string;
+  buyLink?: BuyLink;
+};
+
+/** Optional “extras” you can require the model to add */
+export type AddOn =
+  | "footwear"
+  | "heels"
+  | "bag"
+  | "jewelry"
+  | "belt"
+  | "watch"
+  | "eyewear"
+  | "headwear"
+  | "outerwear"
+  | "socks"
+  | "scarf";
+
 export type Outfit = {
   id: string;
   title: string;
@@ -25,11 +48,15 @@ export type Outfit = {
   };
 
   // HCI extras
-  explanation?: string;                   // “Why this works”
-  highlights?: string[];                  // bullets: color/fabric/pattern
-  confidence?: number;                    // 0–1
-  buyLinks?: BuyLink[];                   // “buy this look”
-  verdict?: "accepted" | "rejected" | null; // swipe / decision
+  explanation?: string;                    // “Why this works”
+  highlights?: string[];                   // bullets: color/fabric/pattern
+  confidence?: number;                     // 0–1
+  buyLinks?: BuyLink[];                    // “buy this look”
+  verdict?: "accepted" | "rejected" | null;
+
+  // NEW: structured inventory + any gaps (especially for closet-only)
+  items?: OutfitItem[];
+  missing?: string[];
 };
 
 // shared between StylistPage, SuggestControls, API filters
@@ -43,7 +70,7 @@ export type Profile = {
   notes?: string;
 };
 
-// 🔧 NEW shape for filters, no style/season/occasion
+// Filters sent to your API
 export type SuggestFilters = {
   // full system prompt you build in buildPrompt()
   prompt: string;
@@ -62,6 +89,10 @@ export type SuggestFilters = {
     casualFormal: number;
     playfulPro: number;
   };
+
+
+  requiredAddOns?: AddOn[];
+  forceCompleteLook?: boolean;
 };
 
 export type ClosetItem = {
