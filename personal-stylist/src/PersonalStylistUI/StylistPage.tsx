@@ -64,7 +64,7 @@ export default function StylistPage() {
   // 1) savedOutfits → feeds LeftNav sidebar (only when user clicks explicit Save)
   // 2) savedLibrary → feeds Saved page (favorites/accepts AND saves)
   const [saved, setSaved] = useLocalStorage<Outfit[]>("savedOutfits", []);
-  const [library, setLibrary] = useLocalStorage<Outfit[]>("savedLibrary", []);
+  const [, setLibrary] = useLocalStorage<Outfit[]>("savedLibrary", []); // ← skip unused first item
 
   const [closet, setCloset] = useLocalStorage<ClosetItem[]>("closet", []);
 
@@ -276,7 +276,7 @@ export default function StylistPage() {
               ),
             },
           };
-    if (idx === -1) return [merged, ...prev];
+      if (idx === -1) return [merged, ...prev];
       const next = [...prev];
       next[idx] = merged;
       return next;

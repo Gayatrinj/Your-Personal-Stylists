@@ -66,7 +66,8 @@ export default function SuggestionsGrid({
                 outfit={o}
                 onSave={() => onSave(o)}
                 onToggleFavorite={onToggleFavorite}
-                onVerdict={onVerdict}
+                onVerdict={(v) => onVerdict(o.id, v)}
+
               />
             ))}
       </div>
